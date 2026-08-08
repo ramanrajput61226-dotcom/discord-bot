@@ -1,3 +1,4 @@
+from keep_alive import keep_alive
 import discord
 from discord.ext import commands
 import asyncio
@@ -99,5 +100,6 @@ def parse_time(time_str):
 
 import os
 
+keep_alive()
 BOT_TOKEN = os.getenv("DISCORD_TOKEN")
 bot.run(BOT_TOKEN)
