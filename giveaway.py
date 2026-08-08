@@ -97,6 +97,7 @@ def parse_time(time_str):
     if unit == 'd': return val * 86400
     return int(time_str)
 
-BOT_TOKEN = "MTUzNTUwNzY2MzU4MzA1OTk5OQ.GXC_CX.Xpy6EdyNYLba7-JY1bXtacW8LRokNMSGFlJxcI"
+import os
 
+BOT_TOKEN = os.getenv("DISCORD_TOKEN")
 bot.run(BOT_TOKEN)
