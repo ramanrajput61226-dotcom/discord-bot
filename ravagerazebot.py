@@ -31,6 +31,7 @@ channel_tracker = {}
 banned_members_history = []
 invites_cache = {}
 message_tracker = {}
+active_giveaways = {}
 
 ticket_support_role_id = None
 ticket_category_id = None
@@ -103,7 +104,7 @@ class BaseTicketModal(Modal):
         self.inputs = []
 
         for f in fields:
-            # Multi-line description & question fix enabled via TextStyle.paragraph or short depending on config
+            # Multi-line description & question fix enabled via TextStyle.paragraph
             text_input = TextInput(
                 label=f["label"][:45],
                 placeholder=f.get("placeholder", "Type here..."),
@@ -171,6 +172,27 @@ class DynamicCustomTicketView(View):
             self.add_item(btn)
 
 
+# ==================== GIVEAWAY SYSTEM CLASSES ====================
+
+class GiveawayJoinView(View):
+    def __init__(self, giveaway_id):
+        super().__init__(timeout=None)
+        self.giveaway_id = giveaway_id
+
+    @discord.ui.button(label="🎉 Join Giveaway", style=discord.ButtonStyle.success, custom_id="join_giveaway")
+    async def join_giveaway(self, interaction: discord.Interaction, button: Button):
+        if self.giveaway_id not in active_giveaways:
+            await interaction.response.send_message("❌ This giveaway has ended!", ephemeral=True)
+            return
+        
+        participants = active_giveaways[self.giveaway_id]["participants"]
+        if interaction.user.id in participants:
+            await interaction.response.send_message("⚠️ You have already joined this giveaway!", ephemeral=True)
+        else:
+            participants.append(interaction.user.id)
+            await interaction.response.send_message("✅ Successfully joined the giveaway! Best of luck! 🍀", ephemeral=True)
+
+
 # ==================== INTERACTIVE SETUP WIZARD VIEW ====================
 
 class SetupWizardModal(Modal):
@@ -186,7 +208,7 @@ class SetupWizardModal(Modal):
             self.add_item(self.panel_desc)
         elif step == "button_info":
             self.btn_name = TextInput(label="Button Name", placeholder="e.g. Buy Rank / Bug Report", max_length=80)
-            self.btn_questions = TextInput(label="Questions (Comma separated)", placeholder="e.g. IGN, Rank, Proof link", style=discord.TextStyle.paragraph)
+            self.btn_questions = TextInput(label="Questions & Options (Comma separated)", placeholder="e.g. IGN, Rank, Proof link", style=discord.TextStyle.paragraph)
             self.add_item(self.btn_name)
             self.add_item(self.btn_questions)
 
@@ -200,13 +222,12 @@ class SetupWizardModal(Modal):
             data["title"] = self.panel_title.value
             data["desc"] = self.panel_desc.value
             
-            # Next step prompt view
             class NextStepView(View):
                 def __init__(self, uid):
                     super().__init__(timeout=300)
                     self.uid = uid
 
-                @discord.ui.button(label="Add Button ➕", style=discord.ButtonStyle.success)
+                @discord.ui.button(label="Add Button & Options ➕", style=discord.ButtonStyle.success)
                 async def add_btn(self, i: discord.Interaction, b: Button):
                     await i.response.send_modal(SetupWizardModal("button_info", self.uid))
 
@@ -224,7 +245,7 @@ class SetupWizardModal(Modal):
                     await i.channel.send(embed=embed, view=view)
                     await i.response.send_message("✅ Clean UI Ticket Panel successfully generated!", ephemeral=True)
 
-            await interaction.response.send_message("📝 Title & Description saved! Now click below to add support buttons with custom questions:", view=NextStepView(self.user_id), ephemeral=True)
+            await interaction.response.send_message("📝 Title & Description saved! Now click below to add support buttons with custom questions/options:", view=NextStepView(self.user_id), ephemeral=True)
 
         elif self.step == "button_info":
             b_name = self.btn_name.value
@@ -254,7 +275,7 @@ class SetupWizardModal(Modal):
                     await i.channel.send(embed=embed, view=view)
                     await i.response.send_message("✅ Clean UI Ticket Panel successfully generated!", ephemeral=True)
 
-            await interaction.response.send_message(f"✅ Button **'{b_name}'** added with {len(q_list)} questions! Add another or finish:", view=AddMoreView(self.user_id), ephemeral=True)
+            await interaction.response.send_message(f"✅ Button **'{b_name}'** added with {len(q_list)} questions/options! Add another or finish:", view=AddMoreView(self.user_id), ephemeral=True)
 
 
 # ==================== BOT READY & INSTANT SLASH SYNC ====================
@@ -381,6 +402,70 @@ async def slash_setup_ticket(
     await interaction.response.send_modal(SetupWizardModal("title_desc", interaction.user.id))
 
 
+@bot.tree.command(name="giveaway", description="Start a giveaway with optional custom/fixed winner.")
+@app_commands.checks.has_permissions(administrator=True)
+async def slash_giveaway(
+    interaction: discord.Interaction, 
+    prize: str, 
+    duration: str, 
+    winners_count: int = 1, 
+    fixed_winner: discord.Member = None
+):
+    seconds = parse_time(duration)
+    embed = discord.Embed(
+        title="🎉 GIVEAWAY 🎉",
+        description=f"**Prize:** {prize}\n**Hosted by:** {interaction.user.mention}\n**Winners:** `{winners_count}`\n\nClick the button below to participate!",
+        color=discord.Color.gold()
+    )
+    embed.set_footer(text=f"Ends in {duration}")
+
+    g_id = random.randint(10000, 99999)
+    active_giveaways[g_id] = {"participants": [], "prize": prize, "fixed_winner": fixed_winner}
+
+    await interaction.response.send_message(embed=embed, view=GiveawayJoinView(g_id))
+    msg = await interaction.original_response()
+
+    await asyncio.sleep(seconds)
+
+    g_data = active_giveaways.pop(g_id, None)
+    if not g_data:
+        return
+
+    participants = g_data["participants"]
+    chosen_winners = []
+
+    # Check if a fixed winner was specified and is valid
+    if fixed_winner and fixed_winner.id in participants:
+        chosen_winners.append(fixed_winner)
+        if fixed_winner.id in participants:
+            participants.remove(fixed_winner.id)
+
+    # Pick remaining winners randomly if needed
+    while len(chosen_winners) < winners_count and participants:
+        winner_id = random.choice(participants)
+        participants.remove(winner_id)
+        member = interaction.guild.get_member(winner_id)
+        if member:
+            chosen_winners.append(member)
+
+    if chosen_winners:
+        winners_mention = ", ".join([w.mention for w in chosen_winners])
+        result_embed = discord.Embed(
+            title="🎉 GIVEAWAY ENDED 🎉",
+            description=f"**Prize:** {prize}\n**Winner(s):** {winners_mention} 🏆",
+            color=discord.Color.green()
+        )
+        await msg.edit(embed=result_embed, view=None)
+        await interaction.channel.send(f"🎊 Congratulations {winners_mention}! You won **{prize}**!")
+    else:
+        result_embed = discord.Embed(
+            title="🎉 GIVEAWAY ENDED 🎉",
+            description=f"**Prize:** {prize}\n❌ No valid participants found.",
+            color=discord.Color.red()
+        )
+        await msg.edit(embed=result_embed, view=None)
+
+
 @bot.tree.command(name="set_ban_limit", description="Set anti-nuke max ban threshold limit.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_set_ban_limit(interaction: discord.Interaction, limit: int):
@@ -417,7 +502,14 @@ async def help_antinuke(interaction: discord.Interaction):
 @bot.tree.command(name="ticket_help", description="Show all Ticket Panel management commands.")
 async def help_ticket(interaction: discord.Interaction):
     embed = discord.Embed(title="🎫 Ticket System Commands", color=discord.Color.blue())
-    embed.add_field(name="/setup_ticket [role] [category]", value="Launch interactive setup wizard for clean ticket panel UI", inline=False)
+    embed.add_field(name="/setup_ticket [role] [category]", value="Launch interactive setup wizard for clean ticket panel UI with options", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="giveaway_help", description="Show all Giveaway system commands.")
+async def help_giveaway(interaction: discord.Interaction):
+    embed = discord.Embed(title="🎉 Giveaway System Commands", color=discord.Color.gold())
+    embed.add_field(name="/giveaway <prize> <duration> [winners_count] [fixed_winner]", value="Start giveaway with optional fixed/custom winner selection", inline=False)
     await interaction.response.send_message(embed=embed)
 
 
