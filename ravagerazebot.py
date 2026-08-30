@@ -74,26 +74,16 @@ def parse_time(time_str):
 async def on_ready():
     print(f"✅ Bot Online & Ready: {bot.user}")
     
-    # 1. Cache invites & Fast Instant Sync for each connected server
-    for guild in bot.guilds:
-        try:
-            invites_cache[guild.id] = await guild.invites()
-            await bot.tree.sync(guild=guild)
-            print(f"⚡ Instant Synced commands for: {guild.name}")
-        except Exception as e:
-            print(f"⚠️ Guild Sync Error ({guild.name}): {e}")
-
-    # 2. Register persistent UI views for tickets
+    # 1. Register persistent UI views for tickets
     bot.add_view(TicketButtonView())
     bot.add_view(TicketControlView())
 
-    # 3. Global Sync Across All Servers
+    # 2. Global Sync Across All Servers (Safe & Fast)
     try:
         synced = await bot.tree.sync()
-        print(f"✅ Synced {len(synced)} Slash Commands globally across all servers!")
+        print(f"✅ Synced {len(synced)} Slash Commands globally!")
     except Exception as e:
         print(f"❌ Global Slash Sync Error: {e}")
-
 
 # ==================== ANTI-SPAM & ANTI-NUKE LOGIC ====================
 
