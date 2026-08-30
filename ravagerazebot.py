@@ -68,13 +68,208 @@ def parse_time(time_str):
     return int(time_str)
 
 
+# ==================== TICKET SYSTEM CLASSES (MUST BE DEFINED BEFORE on_ready) ====================
+
+class TicketControlView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Claim Ticket 🖐️", style=discord.ButtonStyle.success, custom_id="claim_ticket")
+    async def claim_ticket(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message(embed=discord.Embed(description=f"✅ Ticket claimed by {interaction.user.mention}!", color=discord.Color.green()))
+
+    @discord.ui.button(label="Close Ticket 🔒", style=discord.ButtonStyle.danger, custom_id="close_ticket")
+    async def close_ticket(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message("🔒 Closing ticket in 5 seconds...")
+        await asyncio.sleep(5)
+        await interaction.channel.delete(reason="Ticket Closed")
+
+
+class BaseTicketModal(Modal):
+    def __init__(self, title, category_name, fields):
+        super().__init__(title=title)
+        self.category_name = category_name
+        self.inputs = []
+
+        for f in fields:
+            text_input = TextInput(
+                label=f["label"],
+                placeholder=f.get("placeholder", ""),
+                style=f.get("style", discord.TextStyle.short),
+                required=f.get("required", True)
+            )
+            self.inputs.append((f["label"], text_input))
+            self.add_item(text_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        user = interaction.user
+
+        ticket_channel_name = f"ticket-{user.name.lower()}"
+        existing_channel = discord.utils.get(guild.channels, name=ticket_channel_name)
+        if existing_channel:
+            await interaction.response.send_message(f"❌ Ticket already active: {existing_channel.mention}", ephemeral=True)
+            return
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
+
+        global ticket_support_role_id
+        support_role = guild.get_role(ticket_support_role_id) if ticket_support_role_id else None
+        if support_role:
+            overwrites[support_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        ticket_channel = await guild.create_text_channel(name=ticket_channel_name, overwrites=overwrites)
+        ping_text = support_role.mention if support_role else "@here"
+        await ticket_channel.send(f"🔔 **New Ticket!** {ping_text} - {user.mention} needs assistance.")
+
+        embed = discord.Embed(
+            title=f"🎫 {self.category_name}",
+            description=f"Welcome {user.mention}!\nOur support team will assist you shortly.",
+            color=discord.Color.red()
+        )
+        for label, input_item in self.inputs:
+            embed.add_field(name=f"📌 {label}", value=input_item.value or "N/A", inline=False)
+        
+        await ticket_channel.send(embed=embed, view=TicketControlView())
+        await interaction.response.send_message(f"✅ Ticket created: {ticket_channel.mention}", ephemeral=True)
+
+
+class TicketButtonView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Player Report", style=discord.ButtonStyle.danger, custom_id="btn_player_report", emoji="📌")
+    async def player_report_btn(self, interaction: discord.Interaction, button: Button):
+        fields = [
+            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
+            {"label": "Rule Breaker IGN", "placeholder": "Target player IGN", "style": discord.TextStyle.short},
+            {"label": "Reason & Proof Link", "placeholder": "Proof details", "style": discord.TextStyle.paragraph}
+        ]
+        await interaction.response.send_modal(BaseTicketModal("📌 Player Report", "Player Report", fields))
+
+    @discord.ui.button(label="Punishment Appeal", style=discord.ButtonStyle.danger, custom_id="btn_punishment_appeal", emoji="📌")
+    async def appeal_btn(self, interaction: discord.Interaction, button: Button):
+        fields = [
+            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
+            {"label": "Punishment Reason", "placeholder": "Why were you banned/muted?", "style": discord.TextStyle.short},
+            {"label": "Why unban you?", "placeholder": "Reason for appeal", "style": discord.TextStyle.paragraph}
+        ]
+        await interaction.response.send_modal(BaseTicketModal("📌 Punishment Appeal", "Punishment Appeal", fields))
+
+    @discord.ui.button(label="Report a Bug", style=discord.ButtonStyle.danger, custom_id="btn_bug_report", emoji="🛠️")
+    async def bug_btn(self, interaction: discord.Interaction, button: Button):
+        fields = [
+            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
+            {"label": "Bug Details", "placeholder": "How to recreate the glitch?", "style": discord.TextStyle.paragraph}
+        ]
+        await interaction.response.send_modal(BaseTicketModal("🛠️ Bug Report", "Bug Report", fields))
+
+    @discord.ui.button(label="Other", style=discord.ButtonStyle.danger, custom_id="btn_other_ticket", emoji="💬")
+    async def other_btn(self, interaction: discord.Interaction, button: Button):
+        fields = [
+            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
+            {"label": "How can we help?", "placeholder": "State your query", "style": discord.TextStyle.paragraph}
+        ]
+        await interaction.response.send_modal(BaseTicketModal("💬 General Support", "General Support", fields))
+
+    @discord.ui.button(label="Staff Report", style=discord.ButtonStyle.danger, custom_id="btn_staff_report", emoji="👍")
+    async def staff_report_btn(self, interaction: discord.Interaction, button: Button):
+        fields = [
+            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
+            {"label": "Staff Name", "placeholder": "Staff member name", "style": discord.TextStyle.short},
+            {"label": "Complaint / Proof", "placeholder": "Details", "style": discord.TextStyle.paragraph}
+        ]
+        await interaction.response.send_modal(BaseTicketModal("👍 Staff Report", "Staff Report", fields))
+
+
+class DynamicCustomTicketView(View):
+    def __init__(self, b1_name, b1_q, b2_name=None, b2_q=None, b3_name=None, b3_q=None):
+        super().__init__(timeout=None)
+
+        if b1_name and b1_q:
+            btn1 = Button(label=b1_name, style=discord.ButtonStyle.danger, emoji="📩", custom_id="cbtn_1")
+            async def b1_cb(interaction: discord.Interaction):
+                q_list = [x.strip() for x in b1_q.split(",") if x.strip()]
+                await interaction.response.send_modal(DynamicCustomModal(b1_name, b1_name, q_list))
+            btn1.callback = b1_cb
+            self.add_item(btn1)
+
+        if b2_name and b2_q:
+            btn2 = Button(label=b2_name, style=discord.ButtonStyle.primary, emoji="📌", custom_id="cbtn_2")
+            async def b2_cb(interaction: discord.Interaction):
+                q_list = [x.strip() for x in b2_q.split(",") if x.strip()]
+                await interaction.response.send_modal(DynamicCustomModal(b2_name, b2_name, q_list))
+            btn2.callback = b2_cb
+            self.add_item(btn2)
+
+        if b3_name and b3_q:
+            btn3 = Button(label=b3_name, style=discord.ButtonStyle.secondary, emoji="⚙️", custom_id="cbtn_3")
+            async def b3_cb(interaction: discord.Interaction):
+                q_list = [x.strip() for x in b3_q.split(",") if x.strip()]
+                await interaction.response.send_modal(DynamicCustomModal(b3_name, b3_name, q_list))
+            btn3.callback = b3_cb
+            self.add_item(btn3)
+
+
+class DynamicCustomModal(Modal):
+    def __init__(self, title, category_name, questions):
+        super().__init__(title=title[:45])
+        self.category_name = category_name
+        self.inputs = []
+
+        for idx, q in enumerate(questions):
+            t_input = TextInput(label=q[:45], placeholder="Type answer...", style=discord.TextStyle.paragraph, custom_id=f"dyn_q_{idx}")
+            self.inputs.append((q, t_input))
+            self.add_item(t_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        user = interaction.user
+
+        ticket_channel_name = f"ticket-{user.name.lower()}"
+        existing_channel = discord.utils.get(guild.channels, name=ticket_channel_name)
+        if existing_channel:
+            await interaction.response.send_message(f"❌ Ticket already active: {existing_channel.mention}", ephemeral=True)
+            return
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
+
+        global ticket_support_role_id
+        support_role = guild.get_role(ticket_support_role_id) if ticket_support_role_id else None
+        if support_role:
+            overwrites[support_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        ticket_channel = await guild.create_text_channel(name=ticket_channel_name, overwrites=overwrites)
+        ping_text = support_role.mention if support_role else "@here"
+        await ticket_channel.send(f"🔔 **New Ticket!** {ping_text} - {user.mention} needs assistance.")
+
+        embed = discord.Embed(
+            title=f"🎫 {self.category_name}",
+            description=f"Welcome {user.mention}!\nOur support team will assist you shortly.",
+            color=discord.Color.red()
+        )
+        for label, input_item in self.inputs:
+            embed.add_field(name=f"📌 {label}", value=input_item.value or "N/A", inline=False)
+        
+        await ticket_channel.send(embed=embed, view=TicketControlView())
+        await interaction.response.send_message(f"✅ Ticket created: {ticket_channel.mention}", ephemeral=True)
+
+
 # ==================== BOT READY & INSTANT SLASH SYNC ====================
 
 @bot.event
 async def on_ready():
     print(f"✅ Bot Online & Ready: {bot.user}")
     
-    # 1. Register persistent UI views for tickets
+    # 1. Register persistent UI views for tickets safely
     bot.add_view(TicketButtonView())
     bot.add_view(TicketControlView())
 
@@ -179,201 +374,6 @@ async def on_guild_channel_delete(channel):
         except Exception as e:
             print(f"[ANTI-NUKE ERROR] {e}")
         break
-
-
-# ==================== TICKET SYSTEM (BUTTONS & MODALS) ====================
-
-class DynamicCustomModal(Modal):
-    def __init__(self, title, category_name, questions):
-        super().__init__(title=title[:45])
-        self.category_name = category_name
-        self.inputs = []
-
-        for idx, q in enumerate(questions):
-            t_input = TextInput(label=q[:45], placeholder="Type answer...", style=discord.TextStyle.paragraph, custom_id=f"dyn_q_{idx}")
-            self.inputs.append((q, t_input))
-            self.add_item(t_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        guild = interaction.guild
-        user = interaction.user
-
-        ticket_channel_name = f"ticket-{user.name.lower()}"
-        existing_channel = discord.utils.get(guild.channels, name=ticket_channel_name)
-        if existing_channel:
-            await interaction.response.send_message(f"❌ Ticket already active: {existing_channel.mention}", ephemeral=True)
-            return
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        }
-
-        global ticket_support_role_id
-        support_role = guild.get_role(ticket_support_role_id) if ticket_support_role_id else None
-        if support_role:
-            overwrites[support_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-
-        ticket_channel = await guild.create_text_channel(name=ticket_channel_name, overwrites=overwrites)
-        ping_text = support_role.mention if support_role else "@here"
-        await ticket_channel.send(f"🔔 **New Ticket!** {ping_text} - {user.mention} needs assistance.")
-
-        embed = discord.Embed(
-            title=f"🎫 {self.category_name}",
-            description=f"Welcome {user.mention}!\nOur support team will assist you shortly.",
-            color=discord.Color.red()
-        )
-        for label, input_item in self.inputs:
-            embed.add_field(name=f"📌 {label}", value=input_item.value or "N/A", inline=False)
-        
-        await ticket_channel.send(embed=embed, view=TicketControlView())
-        await interaction.response.send_message(f"✅ Ticket created: {ticket_channel.mention}", ephemeral=True)
-
-
-class DynamicCustomTicketView(View):
-    def __init__(self, b1_name, b1_q, b2_name=None, b2_q=None, b3_name=None, b3_q=None):
-        super().__init__(timeout=None)
-
-        if b1_name and b1_q:
-            btn1 = Button(label=b1_name, style=discord.ButtonStyle.danger, emoji="📩", custom_id="cbtn_1")
-            async def b1_cb(interaction: discord.Interaction):
-                q_list = [x.strip() for x in b1_q.split(",") if x.strip()]
-                await interaction.response.send_modal(DynamicCustomModal(b1_name, b1_name, q_list))
-            btn1.callback = b1_cb
-            self.add_item(btn1)
-
-        if b2_name and b2_q:
-            btn2 = Button(label=b2_name, style=discord.ButtonStyle.primary, emoji="📌", custom_id="cbtn_2")
-            async def b2_cb(interaction: discord.Interaction):
-                q_list = [x.strip() for x in b2_q.split(",") if x.strip()]
-                await interaction.response.send_modal(DynamicCustomModal(b2_name, b2_name, q_list))
-            btn2.callback = b2_cb
-            self.add_item(btn2)
-
-        if b3_name and b3_q:
-            btn3 = Button(label=b3_name, style=discord.ButtonStyle.secondary, emoji="⚙️", custom_id="cbtn_3")
-            async def b3_cb(interaction: discord.Interaction):
-                q_list = [x.strip() for x in b3_q.split(",") if x.strip()]
-                await interaction.response.send_modal(DynamicCustomModal(b3_name, b3_name, q_list))
-            btn3.callback = b3_cb
-            self.add_item(btn3)
-
-
-class BaseTicketModal(Modal):
-    def __init__(self, title, category_name, fields):
-        super().__init__(title=title)
-        self.category_name = category_name
-        self.inputs = []
-
-        for f in fields:
-            text_input = TextInput(
-                label=f["label"],
-                placeholder=f.get("placeholder", ""),
-                style=f.get("style", discord.TextStyle.short),
-                required=f.get("required", True)
-            )
-            self.inputs.append((f["label"], text_input))
-            self.add_item(text_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        guild = interaction.guild
-        user = interaction.user
-
-        ticket_channel_name = f"ticket-{user.name.lower()}"
-        existing_channel = discord.utils.get(guild.channels, name=ticket_channel_name)
-        if existing_channel:
-            await interaction.response.send_message(f"❌ Ticket already active: {existing_channel.mention}", ephemeral=True)
-            return
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        }
-
-        global ticket_support_role_id
-        support_role = guild.get_role(ticket_support_role_id) if ticket_support_role_id else None
-        if support_role:
-            overwrites[support_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-
-        ticket_channel = await guild.create_text_channel(name=ticket_channel_name, overwrites=overwrites)
-        ping_text = support_role.mention if support_role else "@here"
-        await ticket_channel.send(f"🔔 **New Ticket!** {ping_text} - {user.mention} needs assistance.")
-
-        embed = discord.Embed(
-            title=f"🎫 {self.category_name}",
-            description=f"Welcome {user.mention}!\nOur support team will assist you shortly.",
-            color=discord.Color.red()
-        )
-        for label, input_item in self.inputs:
-            embed.add_field(name=f"📌 {label}", value=input_item.value or "N/A", inline=False)
-        
-        await ticket_channel.send(embed=embed, view=TicketControlView())
-        await interaction.response.send_message(f"✅ Ticket created: {ticket_channel.mention}", ephemeral=True)
-
-
-class TicketButtonView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="Player Report", style=discord.ButtonStyle.danger, custom_id="btn_player_report", emoji="📌")
-    async def player_report_btn(self, interaction: discord.Interaction, button: Button):
-        fields = [
-            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
-            {"label": "Rule Breaker IGN", "placeholder": "Target player IGN", "style": discord.TextStyle.short},
-            {"label": "Reason & Proof Link", "placeholder": "Proof details", "style": discord.TextStyle.paragraph}
-        ]
-        await interaction.response.send_modal(BaseTicketModal("📌 Player Report", "Player Report", fields))
-
-    @discord.ui.button(label="Punishment Appeal", style=discord.ButtonStyle.danger, custom_id="btn_punishment_appeal", emoji="📌")
-    async def appeal_btn(self, interaction: discord.Interaction, button: Button):
-        fields = [
-            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
-            {"label": "Punishment Reason", "placeholder": "Why were you banned/muted?", "style": discord.TextStyle.short},
-            {"label": "Why unban you?", "placeholder": "Reason for appeal", "style": discord.TextStyle.paragraph}
-        ]
-        await interaction.response.send_modal(BaseTicketModal("📌 Punishment Appeal", "Punishment Appeal", fields))
-
-    @discord.ui.button(label="Report a Bug", style=discord.ButtonStyle.danger, custom_id="btn_bug_report", emoji="🛠️")
-    async def bug_btn(self, interaction: discord.Interaction, button: Button):
-        fields = [
-            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
-            {"label": "Bug Details", "placeholder": "How to recreate the glitch?", "style": discord.TextStyle.paragraph}
-        ]
-        await interaction.response.send_modal(BaseTicketModal("🛠️ Bug Report", "Bug Report", fields))
-
-    @discord.ui.button(label="Other", style=discord.ButtonStyle.danger, custom_id="btn_other_ticket", emoji="💬")
-    async def other_btn(self, interaction: discord.Interaction, button: Button):
-        fields = [
-            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
-            {"label": "How can we help?", "placeholder": "State your query", "style": discord.TextStyle.paragraph}
-        ]
-        await interaction.response.send_modal(BaseTicketModal("💬 General Support", "General Support", fields))
-
-    @discord.ui.button(label="Staff Report", style=discord.ButtonStyle.danger, custom_id="btn_staff_report", emoji="👍")
-    async def staff_report_btn(self, interaction: discord.Interaction, button: Button):
-        fields = [
-            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
-            {"label": "Staff Name", "placeholder": "Staff member name", "style": discord.TextStyle.short},
-            {"label": "Complaint / Proof", "placeholder": "Details", "style": discord.TextStyle.paragraph}
-        ]
-        await interaction.response.send_modal(BaseTicketModal("👍 Staff Report", "Staff Report", fields))
-
-
-class TicketControlView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="Claim Ticket 🖐️", style=discord.ButtonStyle.success, custom_id="claim_ticket")
-    async def claim_ticket(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message(embed=discord.Embed(description=f"✅ Ticket claimed by {interaction.user.mention}!", color=discord.Color.green()))
-
-    @discord.ui.button(label="Close Ticket 🔒", style=discord.ButtonStyle.danger, custom_id="close_ticket")
-    async def close_ticket(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message("🔒 Closing ticket in 5 seconds...")
-        await asyncio.sleep(5)
-        await interaction.channel.delete(reason="Ticket Closed")
 
 
 # ==================== SLASH COMMANDS ====================
