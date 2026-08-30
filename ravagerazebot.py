@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from keep_alive import keep_alive
 import os
 
+# ==================== INTENTS SETUP ====================
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -17,7 +19,8 @@ intents.invites = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Global Settings & Limits
+# ==================== GLOBAL CONFIGURATION & TRACKERS ====================
+
 ban_limit = 5
 channel_limit = 4
 spam_limit = 5
@@ -36,6 +39,7 @@ custom_welcome_msg = None
 custom_welcome_img = None
 invite_log_channel_id = None
 
+# ==================== HELPER FUNCTIONS ====================
 
 def clean_tracker(tracker, user_id, time_limit_seconds=120):
     now = datetime.now(timezone.utc)
@@ -79,16 +83,17 @@ async def on_ready():
         except Exception as e:
             print(f"⚠️ Guild Sync Error ({guild.name}): {e}")
 
-    # 2. Register persistent UI views
+    # 2. Register persistent UI views for tickets
     bot.add_view(TicketButtonView())
     bot.add_view(TicketControlView())
 
-    # 3. Global Sync Across All Servers (For new future invites)
+    # 3. Global Sync Across All Servers
     try:
         synced = await bot.tree.sync()
         print(f"✅ Synced {len(synced)} Slash Commands globally across all servers!")
     except Exception as e:
         print(f"❌ Global Slash Sync Error: {e}")
+
 
 # ==================== ANTI-SPAM & ANTI-NUKE LOGIC ====================
 
@@ -404,6 +409,7 @@ async def slash_setup_ticket(interaction: discord.Interaction, role: discord.Rol
     await interaction.channel.send(embed=embed, view=TicketButtonView())
     await interaction.response.send_message("✅ Button Ticket Panel created!", ephemeral=True)
 
+
 @bot.tree.command(name="setup_custom_ticket", description="Post custom ticket panel with dynamic questions.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_setup_custom_ticket(
@@ -425,12 +431,14 @@ async def slash_setup_custom_ticket(
     await interaction.channel.send(embed=embed, view=view)
     await interaction.response.send_message("✅ Dynamic Custom Ticket Panel created!", ephemeral=True)
 
+
 @bot.tree.command(name="set_ban_limit", description="Set anti-nuke max ban threshold limit.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_set_ban_limit(interaction: discord.Interaction, limit: int):
     global ban_limit
     ban_limit = limit
     await interaction.response.send_message(f"✅ **Anti-Nuke Ban Limit updated to:** `{ban_limit}` bans / 2 mins")
+
 
 @bot.tree.command(name="set_channel_limit", description="Set anti-nuke max channel delete threshold limit.")
 @app_commands.checks.has_permissions(administrator=True)
@@ -439,12 +447,14 @@ async def slash_set_channel_limit(interaction: discord.Interaction, limit: int):
     channel_limit = limit
     await interaction.response.send_message(f"✅ **Anti-Nuke Channel Delete Limit updated to:** `{channel_limit}` channels / 2 mins")
 
+
 @bot.tree.command(name="set_spam_limit", description="Set max allowed messages within 5 seconds before mute.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_set_spam_limit(interaction: discord.Interaction, messages_count: int):
     global spam_limit
     spam_limit = messages_count
     await interaction.response.send_message(f"✅ **Anti-Spam Limit updated to:** `{spam_limit}` msgs / 5 sec")
+
 
 @bot.tree.command(name="antinuke_help", description="Show all Anti-Nuke and Anti-Spam configuration commands.")
 async def help_antinuke(interaction: discord.Interaction):
@@ -454,12 +464,14 @@ async def help_antinuke(interaction: discord.Interaction):
     embed.add_field(name="/set_spam_limit <msgs>", value="Set message spam speed threshold", inline=False)
     await interaction.response.send_message(embed=embed)
 
+
 @bot.tree.command(name="ticket_help", description="Show all Ticket Panel management commands.")
 async def help_ticket(interaction: discord.Interaction):
     embed = discord.Embed(title="🎫 Ticket System Commands", color=discord.Color.blue())
     embed.add_field(name="/setup_ticket [role]", value="Post default button panel", inline=False)
     embed.add_field(name="/setup_custom_ticket", value="Post custom categories & custom questions panel", inline=False)
     await interaction.response.send_message(embed=embed)
+
 
 @bot.tree.command(name="welcome_help", description="Show all Welcome System commands.")
 async def help_welcome(interaction: discord.Interaction):
@@ -470,12 +482,14 @@ async def help_welcome(interaction: discord.Interaction):
     embed.add_field(name="/disable_welcome", value="Turn off welcome system", inline=False)
     await interaction.response.send_message(embed=embed)
 
+
 @bot.tree.command(name="invites_help", description="Show all Invite Tracker commands.")
 async def help_invites(interaction: discord.Interaction):
     embed = discord.Embed(title="📊 Invite Tracker Commands", color=discord.Color.gold())
     embed.add_field(name="/setup_invitelog [channel]", value="Set invite logging channel", inline=False)
     embed.add_field(name="/invites [member]", value="Check member invite count", inline=False)
     await interaction.response.send_message(embed=embed)
+
 
 @bot.tree.command(name="moderation_help", description="Show all Moderation commands.")
 async def help_mod(interaction: discord.Interaction):
@@ -486,6 +500,7 @@ async def help_mod(interaction: discord.Interaction):
     embed.add_field(name="/dmall <message>", value="Broadcast announcement via DMs", inline=False)
     await interaction.response.send_message(embed=embed)
 
+
 @bot.tree.command(name="setup_invitelog", description="Set channel for invite logs.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_setup_invitelog(interaction: discord.Interaction, channel: discord.TextChannel = None):
@@ -493,6 +508,7 @@ async def slash_setup_invitelog(interaction: discord.Interaction, channel: disco
     target = channel or interaction.channel
     invite_log_channel_id = target.id
     await interaction.response.send_message(f"✅ **Invite Logger set to:** {target.mention}")
+
 
 @bot.tree.command(name="invites", description="Check invite stats of a server member.")
 async def slash_invites(interaction: discord.Interaction, member: discord.Member = None):
@@ -513,6 +529,7 @@ async def slash_invites(interaction: discord.Interaction, member: discord.Member
     )
     await interaction.response.send_message(embed=embed)
 
+
 @bot.tree.command(name="dmall", description="Send DM announcement to all server members.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_dmall(interaction: discord.Interaction, message: str):
@@ -531,6 +548,7 @@ async def slash_dmall(interaction: discord.Interaction, message: str):
 
     await interaction.followup.send(f"✅ Sent: {success_count} | ❌ Failed: {failed_count}")
 
+
 @bot.tree.command(name="setup_welcome", description="Set welcome channel.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_setup_welcome(interaction: discord.Interaction, channel: discord.TextChannel = None):
@@ -540,12 +558,14 @@ async def slash_setup_welcome(interaction: discord.Interaction, channel: discord
     welcome_enabled = True
     await interaction.response.send_message(f"✅ **Welcome channel set to:** {target.mention}")
 
+
 @bot.tree.command(name="set_welcomemsg", description="Set custom welcome text.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_set_welcomemsg(interaction: discord.Interaction, message: str):
     global custom_welcome_msg
     custom_welcome_msg = message
     await interaction.response.send_message("✅ **Custom Welcome Message Set!**")
+
 
 @bot.tree.command(name="set_welcomeimg", description="Set banner image URL.")
 @app_commands.checks.has_permissions(administrator=True)
@@ -554,12 +574,14 @@ async def slash_set_welcomeimg(interaction: discord.Interaction, url: str):
     custom_welcome_img = url
     await interaction.response.send_message(f"✅ **Image Set:** {url}")
 
+
 @bot.tree.command(name="disable_welcome", description="Disable welcome messages.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_disable_welcome(interaction: discord.Interaction):
     global welcome_enabled
     welcome_enabled = False
     await interaction.response.send_message("🚫 **Welcome messages DISABLED!**")
+
 
 @bot.tree.command(name="ban", description="Ban a member.")
 @app_commands.checks.has_permissions(ban_members=True)
@@ -569,6 +591,7 @@ async def slash_ban(interaction: discord.Interaction, member: discord.Member, re
         return
     await member.ban(reason=reason)
     await interaction.response.send_message(f"🔨 **{member.mention} banned!**")
+
 
 @bot.tree.command(name="mute", description="Timeout a member.")
 @app_commands.checks.has_permissions(moderate_members=True)
@@ -580,7 +603,7 @@ async def slash_mute(interaction: discord.Interaction, member: discord.Member, d
     await member.timeout(timedelta(seconds=seconds), reason=reason)
     await interaction.response.send_message(f"🤐 **{member.mention} timed out for {duration}!**")
 
-# ==================== PURGE COMMAND ====================
+
 @bot.tree.command(name="purge", description="Bulk delete messages in current channel.")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def slash_purge(interaction: discord.Interaction, amount: int):
@@ -651,6 +674,8 @@ async def on_member_join(member):
         embed.set_footer(text=f"Member #{guild.member_count}")
         await target_channel.send(content=f"Welcome {member.mention}!", embed=embed)
 
+
+# ==================== RUN BOT ====================
 
 keep_alive()
 BOT_TOKEN = os.getenv("DISCORD_TOKEN")
