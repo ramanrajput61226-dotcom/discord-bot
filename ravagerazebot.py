@@ -98,9 +98,11 @@ class TicketControlView(View):
 
 
 class BaseTicketModal(Modal):
-    def __init__(self, title, category_name, fields):
+    def __init__(self, title, category_name, fields, custom_inside_title=None, custom_inside_desc=None):
         super().__init__(title=title[:45])
         self.category_name = category_name
+        self.custom_inside_title = custom_inside_title
+        self.custom_inside_desc = custom_inside_desc
         self.inputs = []
 
         for f in fields:
@@ -148,9 +150,13 @@ class BaseTicketModal(Modal):
         await ticket_channel.send(f"🔔 **New Ticket!** {ping_text} - {user.mention} needs assistance.")
 
         # Ticket Inside Title & Description Customization Fix
+        embed_title = self.custom_inside_title if self.custom_inside_title else f"🎫 {self.category_name}"
+        embed_desc = self.custom_inside_desc if self.custom_inside_desc else f"Welcome {user.mention}!\nOur support team will assist you shortly. Please provide your details below."
+        embed_desc = embed_desc.replace("{user}", user.mention)
+
         embed = discord.Embed(
-            title=f"🎫 {self.category_name}",
-            description=f"Welcome {user.mention}!\nOur support team will assist you shortly. Please provide your details below.",
+            title=embed_title,
+            description=embed_desc,
             color=discord.Color.red()
         )
         for label, input_item in self.inputs:
@@ -161,13 +167,13 @@ class BaseTicketModal(Modal):
 
 
 class DynamicCustomTicketView(View):
-    def __init__(self, buttons_data):
+    def __init__(self, buttons_data, inside_title, inside_desc):
         super().__init__(timeout=None)
         for b_name, b_questions in buttons_data:
             btn = Button(label=b_name[:80], style=discord.ButtonStyle.danger, emoji="📩")
             async def cb(interaction: discord.Interaction, name=b_name, questions=b_questions):
                 fields = [{"label": q, "placeholder": f"Enter {q}...", "style": discord.TextStyle.paragraph} for q in questions]
-                await interaction.response.send_modal(BaseTicketModal(name, name, fields))
+                await interaction.response.send_modal(BaseTicketModal(name, name, fields, inside_title, inside_desc))
             btn.callback = cb
             self.add_item(btn)
 
@@ -211,6 +217,11 @@ class SetupWizardModal(Modal):
             self.btn_questions = TextInput(label="Questions & Options (Comma separated)", placeholder="e.g. IGN, Rank, Proof link", style=discord.TextStyle.paragraph)
             self.add_item(self.btn_name)
             self.add_item(self.btn_questions)
+        elif step == "inside_ticket_info":
+            self.inside_title = TextInput(label="Inside Ticket Title", placeholder="e.g. 🎫 Support Ticket", default="🎫 Support Ticket", max_length=100)
+            self.inside_desc = TextInput(label="Inside Ticket Description", placeholder="e.g. Welcome {user}, team will help!", style=discord.TextStyle.paragraph, default="Welcome {user}!\nOur support team will assist you shortly.")
+            self.add_item(self.inside_title)
+            self.add_item(self.inside_desc)
 
     async def on_submit(self, interaction: discord.Interaction):
         data = setup_wizards.get(self.user_id)
@@ -231,20 +242,6 @@ class SetupWizardModal(Modal):
                 async def add_btn(self, i: discord.Interaction, b: Button):
                     await i.response.send_modal(SetupWizardModal("button_info", self.uid))
 
-                @discord.ui.button(label="Finish & Post Panel ✅", style=discord.ButtonStyle.primary)
-                async def finish_setup(self, i: discord.Interaction, b: Button):
-                    d = setup_wizards.pop(self.uid, None)
-                    if not d:
-                        await i.response.send_message("❌ Session error.", ephemeral=True)
-                        return
-                    
-                    embed = discord.Embed(title=d["title"], description=d["desc"], color=discord.Color.from_rgb(230, 230, 210))
-                    embed.set_footer(text=f"Powered by {bot.user.name}")
-                    
-                    view = DynamicCustomTicketView(d["buttons"])
-                    await i.channel.send(embed=embed, view=view)
-                    await i.response.send_message("✅ Clean UI Ticket Panel successfully generated!", ephemeral=True)
-
             await interaction.response.send_message("📝 Title & Description saved! Now click below to add support buttons with custom questions/options:", view=NextStepView(self.user_id), ephemeral=True)
 
         elif self.step == "button_info":
@@ -252,7 +249,7 @@ class SetupWizardModal(Modal):
             q_list = [q.strip() for q in self.btn_questions.value.split(",") if q.strip()]
             data["buttons"].append((b_name, q_list))
 
-            class AddMoreView(View):
+            class AddMoreOrInsideView(View):
                 def __init__(self, uid):
                     super().__init__(timeout=300)
                     self.uid = uid
@@ -261,21 +258,27 @@ class SetupWizardModal(Modal):
                 async def add_more(self, i: discord.Interaction, b: Button):
                     await i.response.send_modal(SetupWizardModal("button_info", self.uid))
 
-                @discord.ui.button(label="Finish & Post Panel ✅", style=discord.ButtonStyle.primary)
-                async def finish_setup(self, i: discord.Interaction, b: Button):
-                    d = setup_wizards.pop(self.uid, None)
-                    if not d:
-                        await i.response.send_message("❌ Session error.", ephemeral=True)
-                        return
-                    
-                    embed = discord.Embed(title=d["title"], description=d["desc"], color=discord.Color.from_rgb(230, 230, 210))
-                    embed.set_footer(text=f"Powered by {bot.user.name}")
-                    
-                    view = DynamicCustomTicketView(d["buttons"])
-                    await i.channel.send(embed=embed, view=view)
-                    await i.response.send_message("✅ Clean UI Ticket Panel successfully generated!", ephemeral=True)
+                @discord.ui.button(label="Next: Inside Ticket Title/Desc ➡️", style=discord.ButtonStyle.primary)
+                async def next_inside(self, i: discord.Interaction, b: Button):
+                    await i.response.send_modal(SetupWizardModal("inside_ticket_info", self.uid))
 
-            await interaction.response.send_message(f"✅ Button **'{b_name}'** added with {len(q_list)} questions/options! Add another or finish:", view=AddMoreView(self.user_id), ephemeral=True)
+            await interaction.response.send_message(f"✅ Button **'{b_name}'** added! Add another button or proceed to customize inside ticket details:", view=AddMoreOrInsideView(self.user_id), ephemeral=True)
+
+        elif self.step == "inside_ticket_info":
+            data["inside_title"] = self.inside_title.value
+            data["inside_desc"] = self.inside_desc.value
+
+            d = setup_wizards.pop(self.user_id, None)
+            if not d:
+                await interaction.response.send_message("❌ Session error.", ephemeral=True)
+                return
+            
+            embed = discord.Embed(title=d["title"], description=d["desc"], color=discord.Color.from_rgb(230, 230, 210))
+            embed.set_footer(text=f"Powered by {bot.user.name}")
+            
+            view = DynamicCustomTicketView(d["buttons"], d["inside_title"], d["inside_desc"])
+            await interaction.channel.send(embed=embed, view=view)
+            await interaction.response.send_message("✅ Clean UI Ticket Panel successfully generated with custom Inside Ticket Title & Description!", ephemeral=True)
 
 
 # ==================== BOT READY & INSTANT SLASH SYNC ====================
@@ -398,7 +401,7 @@ async def slash_setup_ticket(
     if role: ticket_support_role_id = role.id
     if category: ticket_category_id = category.id
 
-    setup_wizards[interaction.user.id] = {"title": "", "desc": "", "buttons": []}
+    setup_wizards[interaction.user.id] = {"title": "", "desc": "", "buttons": [], "inside_title": "", "inside_desc": ""}
     await interaction.response.send_modal(SetupWizardModal("title_desc", interaction.user.id))
 
 
