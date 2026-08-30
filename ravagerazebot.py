@@ -64,26 +64,31 @@ def parse_time(time_str):
     return int(time_str)
 
 
-# ==================== BOT READY & SLASH SYNC ====================
+# ==================== BOT READY & INSTANT SLASH SYNC ====================
 
 @bot.event
 async def on_ready():
     print(f"✅ Bot Online & Ready: {bot.user}")
     
+    # 1. Cache invites & Fast Instant Sync for each connected server
     for guild in bot.guilds:
         try:
             invites_cache[guild.id] = await guild.invites()
-        except Exception:
-            pass
+            await bot.tree.sync(guild=guild)
+            print(f"⚡ Instant Synced commands for: {guild.name}")
+        except Exception as e:
+            print(f"⚠️ Guild Sync Error ({guild.name}): {e}")
 
+    # 2. Register persistent UI views
     bot.add_view(TicketButtonView())
     bot.add_view(TicketControlView())
 
+    # 3. Global Sync Across All Servers (For new future invites)
     try:
         synced = await bot.tree.sync()
         print(f"✅ Synced {len(synced)} Slash Commands globally across all servers!")
     except Exception as e:
-        print(f"❌ Slash Sync Error: {e}")
+        print(f"❌ Global Slash Sync Error: {e}")
 
 # ==================== ANTI-SPAM & ANTI-NUKE LOGIC ====================
 
@@ -189,8 +194,8 @@ class DynamicCustomModal(Modal):
         self.category_name = category_name
         self.inputs = []
 
-        for q in questions:
-            t_input = TextInput(label=q[:45], placeholder="Type answer...", style=discord.TextStyle.paragraph)
+        for idx, q in enumerate(questions):
+            t_input = TextInput(label=q[:45], placeholder="Type answer...", style=discord.TextStyle.paragraph, custom_id=f"dyn_q_{idx}")
             self.inputs.append((q, t_input))
             self.add_item(t_input)
 
@@ -399,7 +404,6 @@ async def slash_setup_ticket(interaction: discord.Interaction, role: discord.Rol
     await interaction.channel.send(embed=embed, view=TicketButtonView())
     await interaction.response.send_message("✅ Button Ticket Panel created!", ephemeral=True)
 
-# NAYI CUSTOM TICKET COMMAND (Bina Kisi Old Feature Ko Disturb Kiye)
 @bot.tree.command(name="setup_custom_ticket", description="Post custom ticket panel with dynamic questions.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_setup_custom_ticket(
@@ -478,6 +482,7 @@ async def help_mod(interaction: discord.Interaction):
     embed = discord.Embed(title="🔨 Moderation Commands", color=discord.Color.purple())
     embed.add_field(name="/ban <member> [reason]", value="Permanently ban a member", inline=False)
     embed.add_field(name="/mute <member> <time> [reason]", value="Timeout member (e.g. 10m, 1h)", inline=False)
+    embed.add_field(name="/purge <amount>", value="Clear up to 100 messages in channel", inline=False)
     embed.add_field(name="/dmall <message>", value="Broadcast announcement via DMs", inline=False)
     await interaction.response.send_message(embed=embed)
 
@@ -574,6 +579,18 @@ async def slash_mute(interaction: discord.Interaction, member: discord.Member, d
     seconds = parse_time(duration)
     await member.timeout(timedelta(seconds=seconds), reason=reason)
     await interaction.response.send_message(f"🤐 **{member.mention} timed out for {duration}!**")
+
+# ==================== PURGE COMMAND ====================
+@bot.tree.command(name="purge", description="Bulk delete messages in current channel.")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def slash_purge(interaction: discord.Interaction, amount: int):
+    if amount < 1 or amount > 100:
+        await interaction.response.send_message("❌ Please specify an amount between 1 and 100.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    deleted = await interaction.channel.purge(limit=amount)
+    await interaction.followup.send(f"🧹 Successfully deleted **{len(deleted)}** messages!", ephemeral=True)
 
 
 # ==================== WELCOME & INVITE EVENT LOGIC ====================
