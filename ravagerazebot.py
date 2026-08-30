@@ -79,9 +79,11 @@ async def on_ready():
     bot.add_view(TicketButtonView())
     bot.add_view(TicketControlView())
 
+    GUILD_ID = discord.Object(id=1130638531741528185) # Server ID Sync
     try:
-        synced = await bot.tree.sync()
-        print(f"✅ Synced {len(synced)} Slash Commands globally!")
+        bot.tree.copy_global_to(guild=GUILD_ID)
+        synced = await bot.tree.sync(guild=GUILD_ID)
+        print(f"✅ Instant Synced {len(synced)} Slash Commands!")
     except Exception as e:
         print(f"❌ Slash Sync Error: {e}")
 
@@ -183,6 +185,83 @@ async def on_guild_channel_delete(channel):
 
 
 # ==================== TICKET SYSTEM (BUTTONS & MODALS) ====================
+
+class DynamicCustomModal(Modal):
+    def __init__(self, title, category_name, questions):
+        super().__init__(title=title[:45])
+        self.category_name = category_name
+        self.inputs = []
+
+        for q in questions:
+            t_input = TextInput(label=q[:45], placeholder="Type answer...", style=discord.TextStyle.paragraph)
+            self.inputs.append((q, t_input))
+            self.add_item(t_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        user = interaction.user
+
+        ticket_channel_name = f"ticket-{user.name.lower()}"
+        existing_channel = discord.utils.get(guild.channels, name=ticket_channel_name)
+        if existing_channel:
+            await interaction.response.send_message(f"❌ Ticket already active: {existing_channel.mention}", ephemeral=True)
+            return
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
+
+        global ticket_support_role_id
+        support_role = guild.get_role(ticket_support_role_id) if ticket_support_role_id else None
+        if support_role:
+            overwrites[support_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        ticket_channel = await guild.create_text_channel(name=ticket_channel_name, overwrites=overwrites)
+        ping_text = support_role.mention if support_role else "@here"
+        await ticket_channel.send(f"🔔 **New Ticket!** {ping_text} - {user.mention} needs assistance.")
+
+        embed = discord.Embed(
+            title=f"🎫 {self.category_name}",
+            description=f"Welcome {user.mention}!\nOur support team will assist you shortly.",
+            color=discord.Color.red()
+        )
+        for label, input_item in self.inputs:
+            embed.add_field(name=f"📌 {label}", value=input_item.value or "N/A", inline=False)
+        
+        await ticket_channel.send(embed=embed, view=TicketControlView())
+        await interaction.response.send_message(f"✅ Ticket created: {ticket_channel.mention}", ephemeral=True)
+
+
+class DynamicCustomTicketView(View):
+    def __init__(self, b1_name, b1_q, b2_name=None, b2_q=None, b3_name=None, b3_q=None):
+        super().__init__(timeout=None)
+
+        if b1_name and b1_q:
+            btn1 = Button(label=b1_name, style=discord.ButtonStyle.danger, emoji="📩", custom_id="cbtn_1")
+            async def b1_cb(interaction: discord.Interaction):
+                q_list = [x.strip() for x in b1_q.split(",") if x.strip()]
+                await interaction.response.send_modal(DynamicCustomModal(b1_name, b1_name, q_list))
+            btn1.callback = b1_cb
+            self.add_item(btn1)
+
+        if b2_name and b2_q:
+            btn2 = Button(label=b2_name, style=discord.ButtonStyle.primary, emoji="📌", custom_id="cbtn_2")
+            async def b2_cb(interaction: discord.Interaction):
+                q_list = [x.strip() for x in b2_q.split(",") if x.strip()]
+                await interaction.response.send_modal(DynamicCustomModal(b2_name, b2_name, q_list))
+            btn2.callback = b2_cb
+            self.add_item(btn2)
+
+        if b3_name and b3_q:
+            btn3 = Button(label=b3_name, style=discord.ButtonStyle.secondary, emoji="⚙️", custom_id="cbtn_3")
+            async def b3_cb(interaction: discord.Interaction):
+                q_list = [x.strip() for x in b3_q.split(",") if x.strip()]
+                await interaction.response.send_modal(DynamicCustomModal(b3_name, b3_name, q_list))
+            btn3.callback = b3_cb
+            self.add_item(btn3)
+
 
 class BaseTicketModal(Modal):
     def __init__(self, title, category_name, fields):
@@ -323,6 +402,28 @@ async def slash_setup_ticket(interaction: discord.Interaction, role: discord.Rol
     await interaction.channel.send(embed=embed, view=TicketButtonView())
     await interaction.response.send_message("✅ Button Ticket Panel created!", ephemeral=True)
 
+# NAYI CUSTOM TICKET COMMAND (Bina Kisi Old Feature Ko Disturb Kiye)
+@bot.tree.command(name="setup_custom_ticket", description="Post custom ticket panel with dynamic questions.")
+@app_commands.checks.has_permissions(administrator=True)
+async def slash_setup_custom_ticket(
+    interaction: discord.Interaction,
+    panel_title: str,
+    btn1_label: str,
+    btn1_questions: str,
+    btn2_label: str = None,
+    btn2_questions: str = None,
+    btn3_label: str = None,
+    btn3_questions: str = None
+):
+    embed = discord.Embed(
+        title=panel_title,
+        description="Select an option below to open a support ticket.",
+        color=discord.Color.red()
+    )
+    view = DynamicCustomTicketView(btn1_label, btn1_questions, btn2_label, btn2_questions, btn3_label, btn3_questions)
+    await interaction.channel.send(embed=embed, view=view)
+    await interaction.response.send_message("✅ Dynamic Custom Ticket Panel created!", ephemeral=True)
+
 @bot.tree.command(name="set_ban_limit", description="Set anti-nuke max ban threshold limit.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_set_ban_limit(interaction: discord.Interaction, limit: int):
@@ -355,7 +456,8 @@ async def help_antinuke(interaction: discord.Interaction):
 @bot.tree.command(name="ticket_help", description="Show all Ticket Panel management commands.")
 async def help_ticket(interaction: discord.Interaction):
     embed = discord.Embed(title="🎫 Ticket System Commands", color=discord.Color.blue())
-    embed.add_field(name="/setup_ticket [role]", value="Post ticket panel with custom button panel", inline=False)
+    embed.add_field(name="/setup_ticket [role]", value="Post default button panel", inline=False)
+    embed.add_field(name="/setup_custom_ticket", value="Post custom categories & custom questions panel", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="welcome_help", description="Show all Welcome System commands.")
