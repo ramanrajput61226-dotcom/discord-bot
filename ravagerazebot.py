@@ -33,6 +33,14 @@ invites_cache = {}
 message_tracker = {}
 
 ticket_support_role_id = None
+ticket_category_id = None  # Fixed: Discord Category storage
+custom_ticket_title = "Help & Support"
+custom_ticket_desc = (
+    "Hi! Welcome to the Support 🎉\n"
+    "Please select the option you want support for.\n"
+    "Thanks For Supporting us 🥰"
+)
+
 welcome_channel_id = None
 welcome_enabled = True
 custom_welcome_msg = None
@@ -68,7 +76,7 @@ def parse_time(time_str):
     return int(time_str)
 
 
-# ==================== TICKET SYSTEM CLASSES (MUST BE DEFINED BEFORE on_ready) ====================
+# ==================== TICKET SYSTEM CLASSES ====================
 
 class TicketControlView(View):
     def __init__(self):
@@ -117,12 +125,19 @@ class BaseTicketModal(Modal):
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
         }
 
-        global ticket_support_role_id
+        global ticket_support_role_id, ticket_category_id
         support_role = guild.get_role(ticket_support_role_id) if ticket_support_role_id else None
         if support_role:
             overwrites[support_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
-        ticket_channel = await guild.create_text_channel(name=ticket_channel_name, overwrites=overwrites)
+        target_category = guild.get_channel(ticket_category_id) if ticket_category_id else None
+
+        ticket_channel = await guild.create_text_channel(
+            name=ticket_channel_name, 
+            overwrites=overwrites, 
+            category=target_category
+        )
+        
         ping_text = support_role.mention if support_role else "@here"
         await ticket_channel.send(f"🔔 **New Ticket!** {ping_text} - {user.mention} needs assistance.")
 
@@ -242,12 +257,19 @@ class DynamicCustomModal(Modal):
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
         }
 
-        global ticket_support_role_id
+        global ticket_support_role_id, ticket_category_id
         support_role = guild.get_role(ticket_support_role_id) if ticket_support_role_id else None
         if support_role:
             overwrites[support_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
-        ticket_channel = await guild.create_text_channel(name=ticket_channel_name, overwrites=overwrites)
+        target_category = guild.get_channel(ticket_category_id) if ticket_category_id else None
+
+        ticket_channel = await guild.create_text_channel(
+            name=ticket_channel_name, 
+            overwrites=overwrites, 
+            category=target_category
+        )
+        
         ping_text = support_role.mention if support_role else "@here"
         await ticket_channel.send(f"🔔 **New Ticket!** {ping_text} - {user.mention} needs assistance.")
 
@@ -269,11 +291,9 @@ class DynamicCustomModal(Modal):
 async def on_ready():
     print(f"✅ Bot Online & Ready: {bot.user}")
     
-    # 1. Register persistent UI views for tickets safely
     bot.add_view(TicketButtonView())
     bot.add_view(TicketControlView())
 
-    # 2. Global Sync Across All Servers (Safe & Fast)
     try:
         synced = await bot.tree.sync()
         print(f"✅ Synced {len(synced)} Slash Commands globally!")
@@ -378,26 +398,30 @@ async def on_guild_channel_delete(channel):
 
 # ==================== SLASH COMMANDS ====================
 
-@bot.tree.command(name="setup_ticket", description="Post ticket panel with individual category buttons.")
+@bot.tree.command(name="setup_ticket", description="Post ticket panel with customizable title, description, category, and role.")
 @app_commands.checks.has_permissions(administrator=True)
-async def slash_setup_ticket(interaction: discord.Interaction, role: discord.Role = None):
-    global ticket_support_role_id
+async def slash_setup_ticket(
+    interaction: discord.Interaction, 
+    role: discord.Role = None, 
+    category: discord.CategoryChannel = None,
+    title: str = None,
+    description: str = None
+):
+    global ticket_support_role_id, ticket_category_id, custom_ticket_title, custom_ticket_desc
     if role: ticket_support_role_id = role.id
+    if category: ticket_category_id = category.id
+    if title: custom_ticket_title = title
+    if description: custom_ticket_desc = description
 
     embed = discord.Embed(
-        title="Help & Support",
-        description=(
-            f"Hi! Welcome to the **{interaction.guild.name}** Support 🎉\n"
-            "We are pleased you are here.\n"
-            "Please select the option you want support for eg *Player Report, Bug Report, Punishment appeal*.\n"
-            "Thanks For Supporting us 🥰"
-        ),
+        title=custom_ticket_title,
+        description=custom_ticket_desc,
         color=discord.Color.from_rgb(230, 230, 210)
     )
     embed.set_footer(text=f"Powered by {bot.user.name}")
 
     await interaction.channel.send(embed=embed, view=TicketButtonView())
-    await interaction.response.send_message("✅ Button Ticket Panel created!", ephemeral=True)
+    await interaction.response.send_message("✅ Customizable Button Ticket Panel created!", ephemeral=True)
 
 
 @bot.tree.command(name="setup_custom_ticket", description="Post custom ticket panel with dynamic questions.")
@@ -410,8 +434,14 @@ async def slash_setup_custom_ticket(
     btn2_label: str = None,
     btn2_questions: str = None,
     btn3_label: str = None,
-    btn3_questions: str = None
+    btn3_questions: str = None,
+    category: discord.CategoryChannel = None,
+    role: discord.Role = None
 ):
+    global ticket_support_role_id, ticket_category_id
+    if role: ticket_support_role_id = role.id
+    if category: ticket_category_id = category.id
+
     embed = discord.Embed(
         title=panel_title,
         description="Select an option below to open a support ticket.",
@@ -458,7 +488,7 @@ async def help_antinuke(interaction: discord.Interaction):
 @bot.tree.command(name="ticket_help", description="Show all Ticket Panel management commands.")
 async def help_ticket(interaction: discord.Interaction):
     embed = discord.Embed(title="🎫 Ticket System Commands", color=discord.Color.blue())
-    embed.add_field(name="/setup_ticket [role]", value="Post default button panel", inline=False)
+    embed.add_field(name="/setup_ticket [role] [category] [title] [description]", value="Post default customizable button panel", inline=False)
     embed.add_field(name="/setup_custom_ticket", value="Post custom categories & custom questions panel", inline=False)
     await interaction.response.send_message(embed=embed)
 
