@@ -79,14 +79,11 @@ async def on_ready():
     bot.add_view(TicketButtonView())
     bot.add_view(TicketControlView())
 
-    GUILD_ID = discord.Object(id=1130638531741528185) # Server ID Sync
     try:
-        bot.tree.copy_global_to(guild=GUILD_ID)
-        synced = await bot.tree.sync(guild=GUILD_ID)
-        print(f"✅ Instant Synced {len(synced)} Slash Commands!")
+        synced = await bot.tree.sync()
+        print(f"✅ Synced {len(synced)} Slash Commands globally across all servers!")
     except Exception as e:
         print(f"❌ Slash Sync Error: {e}")
-
 
 # ==================== ANTI-SPAM & ANTI-NUKE LOGIC ====================
 
