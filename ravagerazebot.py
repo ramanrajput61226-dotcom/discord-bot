@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord.ui import Button, View, Select, Modal, TextInput
+from discord.ui import Button, View, Modal, TextInput
 from discord import app_commands
 import asyncio
 import random
@@ -17,30 +17,24 @@ intents.invites = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Global Settings & Limits (Customizable via Commands)
+# Global Settings & Limits
 ban_limit = 5
 channel_limit = 4
 spam_limit = 5
-spam_time_window = 5  # seconds
+spam_time_window = 5
 
-# Trackers
 ban_tracker = {}
 channel_tracker = {}
 banned_members_history = []
 invites_cache = {}
 message_tracker = {}
 
-# System Configs
 ticket_support_role_id = None
-rigged_winner_id = None
 welcome_channel_id = None
 welcome_enabled = True
 custom_welcome_msg = None
 custom_welcome_img = None
 invite_log_channel_id = None
-
-ticket_panel_title = "📩 Support & Help Desk"
-ticket_panel_desc = "Niche diye gaye dropdown menu se apni requirement select karein!"
 
 
 def clean_tracker(tracker, user_id, time_limit_seconds=120):
@@ -82,7 +76,7 @@ async def on_ready():
         except Exception:
             pass
 
-    bot.add_view(TicketSelectView())
+    bot.add_view(TicketButtonView())
     bot.add_view(TicketControlView())
 
     try:
@@ -118,7 +112,6 @@ async def on_message(message):
     if message.author.bot or not message.guild:
         return
 
-    # Anti-Spam Tracker
     if not is_whitelisted(message.author, message.guild):
         user_id = message.author.id
         now = datetime.now(timezone.utc)
@@ -189,7 +182,7 @@ async def on_guild_channel_delete(channel):
         break
 
 
-# ==================== TICKET SYSTEM MODALS & VIEWS ====================
+# ==================== TICKET SYSTEM (BUTTONS & MODALS) ====================
 
 class BaseTicketModal(Modal):
     def __init__(self, title, category_name, fields):
@@ -214,7 +207,7 @@ class BaseTicketModal(Modal):
         ticket_channel_name = f"ticket-{user.name.lower()}"
         existing_channel = discord.utils.get(guild.channels, name=ticket_channel_name)
         if existing_channel:
-            await interaction.response.send_message(f"❌ Ticket active: {existing_channel.mention}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Ticket already active: {existing_channel.mention}", ephemeral=True)
             return
 
         overwrites = {
@@ -230,12 +223,12 @@ class BaseTicketModal(Modal):
 
         ticket_channel = await guild.create_text_channel(name=ticket_channel_name, overwrites=overwrites)
         ping_text = support_role.mention if support_role else "@here"
-        await ticket_channel.send(f"🔔 **New Ticket!** {ping_text} - {user.mention} needs help.")
+        await ticket_channel.send(f"🔔 **New Ticket!** {ping_text} - {user.mention} needs assistance.")
 
         embed = discord.Embed(
             title=f"🎫 {self.category_name}",
-            description=f"Welcome {user.mention}!\nOur team will assist you shortly.",
-            color=discord.Color.blue()
+            description=f"Welcome {user.mention}!\nOur support team will assist you shortly.",
+            color=discord.Color.red()
         )
         for label, input_item in self.inputs:
             embed.add_field(name=f"📌 {label}", value=input_item.value or "N/A", inline=False)
@@ -244,52 +237,52 @@ class BaseTicketModal(Modal):
         await interaction.response.send_message(f"✅ Ticket created: {ticket_channel.mention}", ephemeral=True)
 
 
-class TicketDropdown(Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(label="Player Report", value="player_report", description="Report a rule breaker", emoji="🚨"),
-            discord.SelectOption(label="Punishment Appeal", value="appeal", description="Appeal ban/mute", emoji="⚖️"),
-            discord.SelectOption(label="Report a Bug", value="bug_report", description="Report glitches", emoji="🐛"),
-            discord.SelectOption(label="General Support", value="general", description="General queries", emoji="❓")
-        ]
-        super().__init__(placeholder="Choose a ticket category...", min_values=1, max_values=1, custom_id="ticket_dropdown_select", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        selected = self.values[0]
-        if selected == "player_report":
-            fields = [
-                {"label": "Your IGN", "placeholder": "Your Minecraft IGN", "style": discord.TextStyle.short},
-                {"label": "Rule Breaker IGN", "placeholder": "Target player IGN", "style": discord.TextStyle.short},
-                {"label": "Reason & Proof Link", "placeholder": "Details and video/img link", "style": discord.TextStyle.paragraph}
-            ]
-            modal = BaseTicketModal("🚨 Player Report", "Player Report", fields)
-        elif selected == "appeal":
-            fields = [
-                {"label": "Your IGN", "placeholder": "Your Minecraft IGN", "style": discord.TextStyle.short},
-                {"label": "Punishment Reason", "placeholder": "Why were you banned?", "style": discord.TextStyle.short},
-                {"label": "Why should we unban you?", "placeholder": "Justification", "style": discord.TextStyle.paragraph}
-            ]
-            modal = BaseTicketModal("⚖️ Punishment Appeal", "Punishment Appeal", fields)
-        elif selected == "bug_report":
-            fields = [
-                {"label": "Your IGN", "placeholder": "Your Minecraft IGN", "style": discord.TextStyle.short},
-                {"label": "Bug Explanation", "placeholder": "How to recreate bug?", "style": discord.TextStyle.paragraph}
-            ]
-            modal = BaseTicketModal("🐛 Bug Report", "Bug Report", fields)
-        else:
-            fields = [
-                {"label": "Your IGN", "placeholder": "Your Minecraft IGN", "style": discord.TextStyle.short},
-                {"label": "Question / Issue", "placeholder": "State your problem", "style": discord.TextStyle.paragraph}
-            ]
-            modal = BaseTicketModal("❓ General Support", "General Support", fields)
-
-        await interaction.response.send_modal(modal)
-
-
-class TicketSelectView(View):
+class TicketButtonView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(TicketDropdown())
+
+    @discord.ui.button(label="Player Report", style=discord.ButtonStyle.danger, custom_id="btn_player_report", emoji="📌")
+    async def player_report_btn(self, interaction: discord.Interaction, button: Button):
+        fields = [
+            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
+            {"label": "Rule Breaker IGN", "placeholder": "Target player IGN", "style": discord.TextStyle.short},
+            {"label": "Reason & Proof Link", "placeholder": "Proof details", "style": discord.TextStyle.paragraph}
+        ]
+        await interaction.response.send_modal(BaseTicketModal("📌 Player Report", "Player Report", fields))
+
+    @discord.ui.button(label="Punishment Appeal", style=discord.ButtonStyle.danger, custom_id="btn_punishment_appeal", emoji="📌")
+    async def appeal_btn(self, interaction: discord.Interaction, button: Button):
+        fields = [
+            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
+            {"label": "Punishment Reason", "placeholder": "Why were you banned/muted?", "style": discord.TextStyle.short},
+            {"label": "Why unban you?", "placeholder": "Reason for appeal", "style": discord.TextStyle.paragraph}
+        ]
+        await interaction.response.send_modal(BaseTicketModal("📌 Punishment Appeal", "Punishment Appeal", fields))
+
+    @discord.ui.button(label="Report a Bug", style=discord.ButtonStyle.danger, custom_id="btn_bug_report", emoji="🛠️")
+    async def bug_btn(self, interaction: discord.Interaction, button: Button):
+        fields = [
+            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
+            {"label": "Bug Details", "placeholder": "How to recreate the glitch?", "style": discord.TextStyle.paragraph}
+        ]
+        await interaction.response.send_modal(BaseTicketModal("🛠️ Bug Report", "Bug Report", fields))
+
+    @discord.ui.button(label="Other", style=discord.ButtonStyle.danger, custom_id="btn_other_ticket", emoji="💬")
+    async def other_btn(self, interaction: discord.Interaction, button: Button):
+        fields = [
+            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
+            {"label": "How can we help?", "placeholder": "State your query", "style": discord.TextStyle.paragraph}
+        ]
+        await interaction.response.send_modal(BaseTicketModal("💬 General Support", "General Support", fields))
+
+    @discord.ui.button(label="Staff Report", style=discord.ButtonStyle.danger, custom_id="btn_staff_report", emoji="👍")
+    async def staff_report_btn(self, interaction: discord.Interaction, button: Button):
+        fields = [
+            {"label": "Your IGN", "placeholder": "In-Game Name", "style": discord.TextStyle.short},
+            {"label": "Staff Name", "placeholder": "Staff member name", "style": discord.TextStyle.short},
+            {"label": "Complaint / Proof", "placeholder": "Details", "style": discord.TextStyle.paragraph}
+        ]
+        await interaction.response.send_modal(BaseTicketModal("👍 Staff Report", "Staff Report", fields))
 
 
 class TicketControlView(View):
@@ -309,7 +302,26 @@ class TicketControlView(View):
 
 # ==================== SLASH COMMANDS ====================
 
-# --- Anti-Nuke & Anti-Spam Control Commands ---
+@bot.tree.command(name="setup_ticket", description="Post ticket panel with individual category buttons.")
+@app_commands.checks.has_permissions(administrator=True)
+async def slash_setup_ticket(interaction: discord.Interaction, role: discord.Role = None):
+    global ticket_support_role_id
+    if role: ticket_support_role_id = role.id
+
+    embed = discord.Embed(
+        title="Help & Support",
+        description=(
+            f"Hi! Welcome to the **{interaction.guild.name}** Support 🎉\n"
+            "We are pleased you are here.\n"
+            "Please select the option you want support for eg *Player Report, Bug Report, Punishment appeal*.\n"
+            "Thanks For Supporting us 🥰"
+        ),
+        color=discord.Color.from_rgb(230, 230, 210)
+    )
+    embed.set_footer(text=f"Powered by {bot.user.name}")
+
+    await interaction.channel.send(embed=embed, view=TicketButtonView())
+    await interaction.response.send_message("✅ Button Ticket Panel created!", ephemeral=True)
 
 @bot.tree.command(name="set_ban_limit", description="Set anti-nuke max ban threshold limit.")
 @app_commands.checks.has_permissions(administrator=True)
@@ -332,8 +344,6 @@ async def slash_set_spam_limit(interaction: discord.Interaction, messages_count:
     spam_limit = messages_count
     await interaction.response.send_message(f"✅ **Anti-Spam Limit updated to:** `{spam_limit}` msgs / 5 sec")
 
-# --- Category Specific Help Slash Commands ---
-
 @bot.tree.command(name="antinuke_help", description="Show all Anti-Nuke and Anti-Spam configuration commands.")
 async def help_antinuke(interaction: discord.Interaction):
     embed = discord.Embed(title="🛡️ Anti-Nuke & Anti-Spam Commands", color=discord.Color.red())
@@ -345,7 +355,7 @@ async def help_antinuke(interaction: discord.Interaction):
 @bot.tree.command(name="ticket_help", description="Show all Ticket Panel management commands.")
 async def help_ticket(interaction: discord.Interaction):
     embed = discord.Embed(title="🎫 Ticket System Commands", color=discord.Color.blue())
-    embed.add_field(name="/setup_ticket [role]", value="Post ticket panel with custom forms", inline=False)
+    embed.add_field(name="/setup_ticket [role]", value="Post ticket panel with custom button panel", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="welcome_help", description="Show all Welcome System commands.")
@@ -371,18 +381,6 @@ async def help_mod(interaction: discord.Interaction):
     embed.add_field(name="/mute <member> <time> [reason]", value="Timeout member (e.g. 10m, 1h)", inline=False)
     embed.add_field(name="/dmall <message>", value="Broadcast announcement via DMs", inline=False)
     await interaction.response.send_message(embed=embed)
-
-# --- Standard System Slash Commands ---
-
-@bot.tree.command(name="setup_ticket", description="Setup Ticket Panel in a channel.")
-@app_commands.checks.has_permissions(administrator=True)
-async def slash_setup_ticket(interaction: discord.Interaction, role: discord.Role = None):
-    global ticket_support_role_id
-    if role: ticket_support_role_id = role.id
-
-    embed = discord.Embed(title=ticket_panel_title, description=ticket_panel_desc, color=discord.Color.gold())
-    await interaction.channel.send(embed=embed, view=TicketSelectView())
-    await interaction.response.send_message("✅ Ticket panel posted!", ephemeral=True)
 
 @bot.tree.command(name="setup_invitelog", description="Set channel for invite logs.")
 @app_commands.checks.has_permissions(administrator=True)
