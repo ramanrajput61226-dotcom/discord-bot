@@ -66,7 +66,9 @@ bot = commands.Bot(
 # ==============================================================================
 
 def is_whitelisted(user: discord.Member, guild: discord.Guild) -> bool:
-    """Check if a user has administrator permissions or bypass status."""
+    """Check if a user is the bot owner or has administrator permissions."""
+    if user.id == OWNER_ID:
+        return True
     if user.guild_permissions.administrator:
         return True
     return False
