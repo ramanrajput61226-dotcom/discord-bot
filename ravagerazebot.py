@@ -225,11 +225,9 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 
 
 # ==========================================================
-# ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (INTERACTIVE PANEL & MANAGEMENT)
+# ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (MULTI-STEP SETUP)
 # ==========================================================
 
-# Global configuration storage
-# format: guild_id = { "category_id": int, "role_id": int, "title": str, "desc": str, "ticket_title": str, "ticket_desc": str, "buttons": { custom_id: { "label": str, "questions": list } } }
 ticket_configs = {}
 ticket_log_channel_id = None
 custom_ticket_ping = "{role} New ticket opened by {user}"
@@ -515,31 +513,35 @@ class TicketSetupModal(Modal):
         )
 
 
-class TicketSetupView(discord.ui.View):
-    def __init__(self):
+# Step 2: Role Selection View
+class TicketRoleSelectView(discord.ui.View):
+    def __init__(self, category):
         super().__init__(timeout=180)
-        self.selected_category = None
-
-    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="1️⃣ Select Category...", channel_types=[discord.ChannelType.category], min_values=1, max_values=1)
-    async def select_category(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
-        self.selected_category = select.values[0]
-        # Turant interaction response bhej rahe hain bina defer ke taaki timeout na ho
-        await interaction.response.edit_message(content=f"✅ Category selected: **{self.selected_category.name}**. Now select the Support Role below.")
+        self.category = category
 
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="2️⃣ Select Support Role...", min_values=1, max_values=1)
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
-        if not self.selected_category:
-            await interaction.response.send_message("❌ Please select a Category first!", ephemeral=True)
-            return
         selected_role = select.values[0]
-        await interaction.response.send_modal(TicketSetupModal(self.selected_category, selected_role))
+        await interaction.response.send_modal(TicketSetupModal(self.category, selected_role))
+
+
+# Step 1: Category Selection View
+class TicketCategorySelectView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=180)
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="1️⃣ Select Ticket Category...", channel_types=[discord.ChannelType.category], min_values=1, max_values=1)
+    async def select_category(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        category = select.values[0]
+        view = TicketRoleSelectView(category)
+        await interaction.response.edit_message(content=f"✅ Category selected: **{category.name}**\nNow select the **Support Role** below:", view=view)
 
 
 @bot.hybrid_command(name="setup_ticket", description="Setup and deploy a ticket panel with management options.")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup_ticket(ctx: commands.Context):
-    view = TicketSetupView()
-    await ctx.send("📌 **Ticket Setup Wizard:** Select the Category and Support Role below.", view=view, ephemeral=True)
+    view = TicketCategorySelectView()
+    await ctx.send("📌 **Ticket Setup Wizard (Step 1):** Select the Category below.", view=view, ephemeral=True)
     
 # ==============================================================================
 # GIVEAWAY SYSTEM WITH FIXED / CUSTOM WINNER LOGIC
