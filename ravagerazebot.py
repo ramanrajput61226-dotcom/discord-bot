@@ -7,6 +7,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from keep_alive import keep_alive
 import os
+import io
 
 # ==================== INTENTS SETUP ====================
 
@@ -17,10 +18,15 @@ intents.guilds = True
 intents.moderation = True
 intents.invites = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+# Custom Prefix Support Function
+async def get_prefix(bot, message):
+    return commands.when_mentioned_or(custom_prefix)(bot, message)
+
+bot = commands.Bot(command_prefix=get_prefix, intents=intents)
 
 # ==================== GLOBAL CONFIGURATION & TRACKERS ====================
 
+custom_prefix = "!"
 ban_limit = 5
 channel_limit = 4
 spam_limit = 5
@@ -35,6 +41,8 @@ active_giveaways = {}
 
 ticket_support_role_id = None
 ticket_category_id = None
+ticket_log_channel_id = None
+custom_ticket_ping = "🔔 **New Ticket!** {role} - {user} needs assistance."
 custom_ticket_title = "Help & Support"
 custom_ticket_desc = (
     "Hi! Welcome to the Support 🎉\n"
@@ -42,14 +50,18 @@ custom_ticket_desc = (
     "Thanks For Supporting us 🥰"
 )
 
+# Active ticket panels stored for direct post-creation editing
+active_ticket_panels = {} # panel_message_id: {"title": str, "desc": str, "buttons": [(name, questions)], "inside_title": str, "inside_desc": str}
+
 welcome_channel_id = None
 welcome_enabled = True
 custom_welcome_msg = None
 custom_welcome_img = None
 invite_log_channel_id = None
 
-# Temporary storage for interactive ticket setup wizard
+# Temporary storage for interactive ticket & welcome setup wizards
 setup_wizards = {}
+welcome_wizards = {}
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -92,7 +104,28 @@ class TicketControlView(View):
 
     @discord.ui.button(label="Close Ticket 🔒", style=discord.ButtonStyle.danger, custom_id="close_ticket")
     async def close_ticket(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message("🔒 Closing ticket in 5 seconds...")
+        await interaction.response.send_message("🔒 Generating transcript & closing ticket in 5 seconds...")
+        
+        # Transcript Generation & Logging Logic
+        try:
+            messages = [f"--- TICKET TRANSCRIPT ({interaction.channel.name}) ---", f"Closed by: {interaction.user} at {datetime.now(timezone.utc)}", ""]
+            async for msg in interaction.channel.history(limit=None, oldest_first=True):
+                timestamp = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                content = msg.content or "[Embed / Attachment]"
+                messages.append(f"[{timestamp}] {msg.author}: {content}")
+            
+            transcript_content = "\n".join(messages)
+            file = discord.File(io.BytesIO(transcript_content.encode('utf-8')), filename=f"transcript-{interaction.channel.name}.txt")
+            
+            global ticket_log_channel_id
+            if ticket_log_channel_id:
+                log_chan = interaction.guild.get_channel(ticket_log_channel_id)
+                if log_chan:
+                    embed_log = discord.Embed(title=f"🔒 Ticket Closed: {interaction.channel.name}", description=f"Closed by {interaction.user.mention}", color=discord.Color.orange(), timestamp=datetime.now(timezone.utc))
+                    await log_chan.send(embed=embed_log, file=file)
+        except Exception as e:
+            print(f"[TRANSCRIPT ERROR] {e}")
+
         await asyncio.sleep(5)
         await interaction.channel.delete(reason="Ticket Closed")
 
@@ -106,7 +139,6 @@ class BaseTicketModal(Modal):
         self.inputs = []
 
         for f in fields:
-            # Multi-line description & question fix enabled via TextStyle.paragraph
             text_input = TextInput(
                 label=f["label"][:45],
                 placeholder=f.get("placeholder", "Type here..."),
@@ -126,14 +158,13 @@ class BaseTicketModal(Modal):
             await interaction.response.send_message(f"❌ Ticket already active: {existing_channel.mention}", ephemeral=True)
             return
 
-        # Strict Permissions Fix: Only user, support role, and bot can read/write
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
         }
 
-        global ticket_support_role_id, ticket_category_id
+        global ticket_support_role_id, ticket_category_id, custom_ticket_ping
         support_role = guild.get_role(ticket_support_role_id) if ticket_support_role_id else None
         if support_role:
             overwrites[support_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
@@ -146,10 +177,10 @@ class BaseTicketModal(Modal):
             category=target_category
         )
         
-        ping_text = support_role.mention if support_role else "@here"
-        await ticket_channel.send(f"🔔 **New Ticket!** {ping_text} - {user.mention} needs assistance.")
+        role_mention = support_role.mention if support_role else "@here"
+        final_ping = custom_ticket_ping.replace("{role}", role_mention).replace("{user}", user.mention)
+        await ticket_channel.send(final_ping)
 
-        # Ticket Inside Title & Description Customization Fix
         embed_title = self.custom_inside_title if self.custom_inside_title else f"🎫 {self.category_name}"
         embed_desc = self.custom_inside_desc if self.custom_inside_desc else f"Welcome {user.mention}!\nOur support team will assist you shortly. Please provide your details below."
         embed_desc = embed_desc.replace("{user}", user.mention)
@@ -199,7 +230,7 @@ class GiveawayJoinView(View):
             await interaction.response.send_message("✅ Successfully joined the giveaway! Best of luck! 🍀", ephemeral=True)
 
 
-# ==================== INTERACTIVE SETUP WIZARD VIEW ====================
+# ==================== INTERACTIVE SETUP WIZARD & EDIT MODALS ====================
 
 class SetupWizardModal(Modal):
     def __init__(self, step, user_id):
@@ -209,12 +240,12 @@ class SetupWizardModal(Modal):
 
         if step == "title_desc":
             self.panel_title = TextInput(label="Panel Title", placeholder="e.g. Server Support", default="Help & Support", max_length=100)
-            self.panel_desc = TextInput(label="Panel Description (Multi-line allowed)", placeholder="Enter welcome note...", style=discord.TextStyle.paragraph, default="Welcome to support!")
+            self.panel_desc = TextInput(label="Panel Description", placeholder="Enter welcome note...", style=discord.TextStyle.paragraph, default="Welcome to support!")
             self.add_item(self.panel_title)
             self.add_item(self.panel_desc)
         elif step == "button_info":
             self.btn_name = TextInput(label="Button Name", placeholder="e.g. Buy Rank / Bug Report", max_length=80)
-            self.btn_questions = TextInput(label="Questions & Options (Comma separated)", placeholder="e.g. IGN, Rank, Proof link", style=discord.TextStyle.paragraph)
+            self.btn_questions = TextInput(label="Questions (Comma separated)", placeholder="e.g. IGN, Rank, Proof link", style=discord.TextStyle.paragraph)
             self.add_item(self.btn_name)
             self.add_item(self.btn_questions)
         elif step == "inside_ticket_info":
@@ -242,7 +273,7 @@ class SetupWizardModal(Modal):
                 async def add_btn(self, i: discord.Interaction, b: Button):
                     await i.response.send_modal(SetupWizardModal("button_info", self.uid))
 
-            await interaction.response.send_message("📝 Title & Description saved! Now click below to add support buttons with custom questions/options:", view=NextStepView(self.user_id), ephemeral=True)
+            await interaction.response.send_message("📝 Title & Description saved! Click below to add support buttons:", view=NextStepView(self.user_id), ephemeral=True)
 
         elif self.step == "button_info":
             b_name = self.btn_name.value
@@ -258,11 +289,11 @@ class SetupWizardModal(Modal):
                 async def add_more(self, i: discord.Interaction, b: Button):
                     await i.response.send_modal(SetupWizardModal("button_info", self.uid))
 
-                @discord.ui.button(label="Next: Inside Ticket Title/Desc ➡️", style=discord.ButtonStyle.primary)
+                @discord.ui.button(label="Next: Inside Ticket Details ➡️", style=discord.ButtonStyle.primary)
                 async def next_inside(self, i: discord.Interaction, b: Button):
                     await i.response.send_modal(SetupWizardModal("inside_ticket_info", self.uid))
 
-            await interaction.response.send_message(f"✅ Button **'{b_name}'** added! Add another button or proceed to customize inside ticket details:", view=AddMoreOrInsideView(self.user_id), ephemeral=True)
+            await interaction.response.send_message(f"✅ Button **'{b_name}'** added! Add another button or proceed:", view=AddMoreOrInsideView(self.user_id), ephemeral=True)
 
         elif self.step == "inside_ticket_info":
             data["inside_title"] = self.inside_title.value
@@ -277,8 +308,63 @@ class SetupWizardModal(Modal):
             embed.set_footer(text=f"Powered by {bot.user.name}")
             
             view = DynamicCustomTicketView(d["buttons"], d["inside_title"], d["inside_desc"])
-            await interaction.channel.send(embed=embed, view=view)
-            await interaction.response.send_message("✅ Clean UI Ticket Panel successfully generated with custom Inside Ticket Title & Description!", ephemeral=True)
+            msg = await interaction.channel.send(embed=embed, view=view)
+            
+            # Save data for direct post-creation editing via /edit_ticket
+            active_ticket_panels[msg.id] = d
+
+            await interaction.response.send_message(f"✅ Ticket Panel created successfully! Panel ID: `{msg.id}` (Use `/edit_ticket` with this ID to modify it later without rebuilding).", ephemeral=True)
+
+
+class EditTicketModal(Modal):
+    def __init__(self, message_id, panel_data):
+        super().__init__(title="Edit Ticket Panel")
+        self.message_id = message_id
+        self.panel_data = panel_data
+
+        self.panel_title = TextInput(label="New Panel Title", default=panel_data["title"], max_length=100)
+        self.panel_desc = TextInput(label="New Panel Description", style=discord.TextStyle.paragraph, default=panel_data["desc"])
+        self.inside_title = TextInput(label="New Inside Ticket Title", default=panel_data["inside_title"], max_length=100)
+        self.inside_desc = TextInput(label="New Inside Ticket Description", style=discord.TextStyle.paragraph, default=panel_data["inside_desc"])
+
+        self.add_item(self.panel_title)
+        self.add_item(self.panel_desc)
+        self.add_item(self.inside_title)
+        self.add_item(self.inside_desc)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.panel_data["title"] = self.panel_title.value
+        self.panel_data["desc"] = self.panel_desc.value
+        self.panel_data["inside_title"] = self.inside_title.value
+        self.panel_data["inside_desc"] = self.inside_desc.value
+
+        try:
+            msg = await interaction.channel.fetch_message(self.message_id)
+            embed = discord.Embed(title=self.panel_data["title"], description=self.panel_data["desc"], color=discord.Color.from_rgb(230, 230, 210))
+            embed.set_footer(text=f"Powered by {bot.user.name}")
+            view = DynamicCustomTicketView(self.panel_data["buttons"], self.panel_data["inside_title"], self.panel_data["inside_desc"])
+            await msg.edit(embed=embed, view=view)
+            await interaction.response.send_message("✅ Ticket Panel successfully updated!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Failed to update panel message. Ensure command is run in the same channel. Error: {e}", ephemeral=True)
+
+
+# ==================== WELCOME SETUP WIZARD ====================
+
+class WelcomeSetupModal(Modal):
+    def __init__(self):
+        super().__init__(title="Welcome System Setup")
+        self.wel_msg = TextInput(label="Welcome Message", style=discord.TextStyle.paragraph, default="Hey {user}, welcome to **{server}**! Member count: {count}", max_length=1000)
+        self.wel_img = TextInput(label="Banner Image URL (Leave blank for user avatar)", required=False, default="")
+        self.add_item(self.wel_msg)
+        self.add_item(self.wel_img)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        global custom_welcome_msg, custom_welcome_img, welcome_enabled
+        custom_welcome_msg = self.wel_msg.value
+        custom_welcome_img = self.wel_img.value if self.wel_img.value.strip() else None
+        welcome_enabled = True
+        await interaction.response.send_message(f"✅ **Welcome System fully configured and enabled!**\nMessage: `{custom_welcome_msg}`", ephemeral=True)
 
 
 # ==================== BOT READY & INSTANT SLASH SYNC ====================
@@ -405,6 +491,23 @@ async def slash_setup_ticket(
     await interaction.response.send_modal(SetupWizardModal("title_desc", interaction.user.id))
 
 
+@bot.tree.command(name="edit_ticket", description="Directly edit an existing ticket panel without rebuilding.")
+@app_commands.checks.has_permissions(administrator=True)
+async def slash_edit_ticket(interaction: discord.Interaction, message_id: str):
+    try:
+        m_id = int(message_id)
+    except ValueError:
+        await interaction.response.send_message("❌ Please provide a valid numeric message ID.", ephemeral=True)
+        return
+
+    panel_data = active_ticket_panels.get(m_id)
+    if not panel_data:
+        await interaction.response.send_message("❌ Panel ID not found in active session cache. Make sure it was created with the new setup wizard.", ephemeral=True)
+        return
+
+    await interaction.response.send_modal(EditTicketModal(m_id, panel_data))
+
+
 @bot.tree.command(name="giveaway", description="Start a giveaway with optional custom/fixed winner.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_giveaway(
@@ -437,13 +540,10 @@ async def slash_giveaway(
     participants = g_data["participants"]
     chosen_winners = []
 
-    # Check if a fixed winner was specified and is valid
     if fixed_winner and fixed_winner.id in participants:
         chosen_winners.append(fixed_winner)
-        if fixed_winner.id in participants:
-            participants.remove(fixed_winner.id)
+        participants.remove(fixed_winner.id)
 
-    # Pick remaining winners randomly if needed
     while len(chosen_winners) < winners_count and participants:
         winner_id = random.choice(participants)
         participants.remove(winner_id)
@@ -493,6 +593,41 @@ async def slash_set_spam_limit(interaction: discord.Interaction, messages_count:
     await interaction.response.send_message(f"✅ **Anti-Spam Limit updated to:** `{spam_limit}` msgs / 5 sec")
 
 
+@bot.tree.command(name="set_prefix", description="Set custom prefix for text commands.")
+@app_commands.checks.has_permissions(administrator=True)
+async def slash_set_prefix(interaction: discord.Interaction, prefix: str):
+    global custom_prefix
+    custom_prefix = prefix
+    await interaction.response.send_message(f"✅ **Custom Prefix updated to:** `{custom_prefix}`")
+
+
+@bot.tree.command(name="role", description="Assign or remove a role from a member easily.")
+@app_commands.checks.has_permissions(manage_roles=True)
+async def slash_role(interaction: discord.Interaction, action: Literal["add", "remove"], member: discord.Member, role: discord.Role):
+    if action == "add":
+        await member.add_roles(role, reason=f"Managed by {interaction.user}")
+        await interaction.response.send_message(f"✅ Successfully added **{role.name}** to {member.mention}!")
+    else:
+        await member.remove_roles(role, reason=f"Managed by {interaction.user}")
+        await interaction.response.send_message(f"✅ Successfully removed **{role.name}** from {member.mention}!")
+
+
+@bot.tree.command(name="ticket_log_channel", description="Set log channel for closed ticket transcripts.")
+@app_commands.checks.has_permissions(administrator=True)
+async def slash_ticket_log_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    global ticket_log_channel_id
+    ticket_log_channel_id = channel.id
+    await interaction.response.send_message(f"✅ **Ticket Transcript Log Channel set to:** {channel.mention}")
+
+
+@bot.tree.command(name="set_ticket_ping", description="Customize ticket opening ping message.")
+@app_commands.checks.has_permissions(administrator=True)
+async def slash_set_ticket_ping(interaction: discord.Interaction, message: str):
+    global custom_ticket_ping
+    custom_ticket_ping = message
+    await interaction.response.send_message(f"✅ **Ticket Open Ping updated!**\nFormat: `{message}`")
+
+
 @bot.tree.command(name="antinuke_help", description="Show all Anti-Nuke and Anti-Spam configuration commands.")
 async def help_antinuke(interaction: discord.Interaction):
     embed = discord.Embed(title="🛡️ Anti-Nuke & Anti-Spam Commands", color=discord.Color.red())
@@ -505,14 +640,17 @@ async def help_antinuke(interaction: discord.Interaction):
 @bot.tree.command(name="ticket_help", description="Show all Ticket Panel management commands.")
 async def help_ticket(interaction: discord.Interaction):
     embed = discord.Embed(title="🎫 Ticket System Commands", color=discord.Color.blue())
-    embed.add_field(name="/setup_ticket [role] [category]", value="Launch interactive setup wizard for clean ticket panel UI with options", inline=False)
+    embed.add_field(name="/setup_ticket [role] [category]", value="Launch interactive setup wizard for clean ticket panel UI", inline=False)
+    embed.add_field(name="/edit_ticket <message_id>", value="Directly edit existing panel without rebuilding", inline=False)
+    embed.add_field(name="/ticket_log_channel <channel>", value="Set channel for closed ticket text transcripts", inline=False)
+    embed.add_field(name="/set_ticket_ping <msg>", value="Set custom ticket mention message using {role} & {user}", inline=False)
     await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(name="giveaway_help", description="Show all Giveaway system commands.")
 async def help_giveaway(interaction: discord.Interaction):
     embed = discord.Embed(title="🎉 Giveaway System Commands", color=discord.Color.gold())
-    embed.add_field(name="/giveaway <prize> <duration> [winners_count] [fixed_winner]", value="Start giveaway with optional fixed/custom winner selection", inline=False)
+    embed.add_field(name="/giveaway <prize> <duration> [winners] [fixed_winner]", value="Start giveaway with optional fixed/custom winner", inline=False)
     await interaction.response.send_message(embed=embed)
 
 
@@ -520,8 +658,9 @@ async def help_giveaway(interaction: discord.Interaction):
 async def help_welcome(interaction: discord.Interaction):
     embed = discord.Embed(title="👋 Welcome System Commands", color=discord.Color.green())
     embed.add_field(name="/setup_welcome [channel]", value="Set welcome channel", inline=False)
+    embed.add_field(name="/setup_welcome_wizard", value="Interactive modal setup for welcome msg & banner image", inline=False)
     embed.add_field(name="/set_welcomemsg <msg>", value="Set custom text with tags {user},{server},{count},{inviter}", inline=False)
-    embed.add_field(name="/set_welcomeimg <url>", value="Set banner GIF/Image", inline=False)
+    embed.add_field(name="/set_welcomeimg <url>", value="Set banner Image URL", inline=False)
     embed.add_field(name="/disable_welcome", value="Turn off welcome system", inline=False)
     await interaction.response.send_message(embed=embed)
 
@@ -540,6 +679,8 @@ async def help_mod(interaction: discord.Interaction):
     embed.add_field(name="/ban <member> [reason]", value="Permanently ban a member", inline=False)
     embed.add_field(name="/mute <member> <time> [reason]", value="Timeout member (e.g. 10m, 1h)", inline=False)
     embed.add_field(name="/purge <amount>", value="Clear up to 100 messages in channel", inline=False)
+    embed.add_field(name="/role <add/remove> <member> <role>", value="Quickly assign or remove roles", inline=False)
+    embed.add_field(name="/set_prefix <prefix>", value="Change bot command prefix", inline=False)
     embed.add_field(name="/dmall <message>", value="Broadcast announcement via DMs", inline=False)
     await interaction.response.send_message(embed=embed)
 
@@ -600,6 +741,12 @@ async def slash_setup_welcome(interaction: discord.Interaction, channel: discord
     welcome_channel_id = target.id
     welcome_enabled = True
     await interaction.response.send_message(f"✅ **Welcome channel set to:** {target.mention}")
+
+
+@bot.tree.command(name="setup_welcome_wizard", description="Launch interactive setup wizard for welcome messages & images.")
+@app_commands.checks.has_permissions(administrator=True)
+async def slash_setup_welcome_wizard(interaction: discord.Interaction):
+    await interaction.response.send_modal(WelcomeSetupModal())
 
 
 @bot.tree.command(name="set_welcomemsg", description="Set custom welcome text.")
@@ -723,3 +870,4 @@ async def on_member_join(member):
 keep_alive()
 BOT_TOKEN = os.getenv("DISCORD_TOKEN")
 bot.run(BOT_TOKEN)
+@bot.tree.command(name="antinuke_help", description="Show all Anti-Nuke and Anti-Spam configuration commands.")
