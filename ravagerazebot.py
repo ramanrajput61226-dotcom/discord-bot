@@ -228,13 +228,6 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 # ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (100% WORKING FIX)
 # ==========================================================
 
-import discord
-from discord.ext import commands
-from discord import app_commands, Modal, TextInput
-import asyncio
-import os
-import random
-from datetime import datetime, timezone
 
 ticket_configs = {}
 ticket_log_channel_id = None
