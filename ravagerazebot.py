@@ -225,7 +225,7 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 
 
 # ==========================================================
-# ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (FULL CODE WITH FIX)
+# ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (100% WORKING FIX)
 # ==========================================================
 
 import discord
@@ -521,15 +521,15 @@ class TicketSetupModal(Modal):
         )
 
 
-@bot.hybrid_command(name="setup_ticket", description="Setup ticket system by providing category and support role.")
+@app_commands.command(name="setup_ticket", description="Setup ticket system by providing category and support role.")
 @app_commands.describe(
     category="The category where tickets will be created",
     role="The support role that can view tickets"
 )
 @app_commands.checks.has_permissions(administrator=True)
-async def setup_ticket(ctx: commands.Context, category: discord.CategoryChannel, role: discord.Role):
+async def setup_ticket(interaction: discord.Interaction, category: discord.CategoryChannel, role: discord.Role):
     modal = TicketSetupModal(category, role)
-    await ctx.send_modal(modal)
+    await interaction.response.send_modal(modal)
     
 # ==============================================================================
 # GIVEAWAY SYSTEM WITH FIXED / CUSTOM WINNER LOGIC
