@@ -3,36 +3,50 @@ import random
 import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Literal
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.ui import Modal, TextInput
 
+# Try importing keep_alive if running on Replit or similar hosting services
 try:
     from keep_alive import keep_alive
 except ImportError:
     def keep_alive():
         pass
 
-# Global States & Configurations
+
+# ==============================================================================
+# GLOBAL STATES & CONFIGURATIONS
+# ==============================================================================
+
 ban_limit = 5
 channel_limit = 3
 spam_limit = 5
 custom_prefix = "!"
+
 ticket_log_channel_id = None
 custom_ticket_ping = "{role}"
+
 invite_log_channel_id = None
 welcome_channel_id = None
 custom_welcome_msg = None
 custom_welcome_img = None
 welcome_enabled = False
+
 invites_cache = {}
 
-# Dynamic Ticket Options & Questions storage for editable features
-ticket_options = [
-    {"label": "Support", "description": "Open a general support ticket", "questions": ["What is your issue?"]},
-    {"label": "Report", "description": "Report a user or bug", "questions": ["Who/What are you reporting?", "Provide proof/details"]}
-]
+# Message tracking dictionary for spam detection: {user_id: [timestamps]}
+spam_tracking = {}
+
+# Active nuke tracking dictionary: {user_id: {'bans': [timestamps], 'channels': [timestamps]}}
+nuke_tracking = {}
+
+
+# ==============================================================================
+# BOT INITIALIZATION & INTENTS
+# ==============================================================================
 
 intents = discord.Intents.default()
 intents.members = True
@@ -40,41 +54,99 @@ intents.guilds = True
 intents.invites = True
 intents.message_content = True
 
-bot = commands.Bot(command_prefix=commands.when_mentioned_or(custom_prefix), intents=intents)
+bot = commands.Bot(
+    command_prefix=commands.when_mentioned_or(custom_prefix),
+    intents=intents,
+    help_command=None
+)
+
+
+# ==============================================================================
+# HELPER FUNCTIONS & CHECKS
+# ==============================================================================
 
 def is_whitelisted(user: discord.Member, guild: discord.Guild) -> bool:
-    return user.guild_permissions.administrator
+    """Check if a user has administrator permissions or bypass status."""
+    if user.guild_permissions.administrator:
+        return True
+    return False
+
 
 def parse_time(duration_str: str) -> int:
+    """Parse duration string like 10s, 5m, 2h, 1d into total seconds."""
     multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
     unit = duration_str[-1].lower()
     val = duration_str[:-1]
     if unit in multipliers and val.isdigit():
         return int(val) * multipliers[unit]
-    return 60
+    return 60  # Default fallback 60 seconds
+
+
+# ==============================================================================
+# BOT EVENTS: ON_READY & CACHING
+# ==============================================================================
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    print(f"==================================================")
+    print(f" Logged in successfully as {bot.user}")
+    print(f" Bot ID: {bot.user.id}")
+    print(f"==================================================")
+
+    # Sync slash commands globally or per guild
     try:
         synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s).")
+        print(f" [Slash Commands] Successfully synced {len(synced)} command(s).")
     except Exception as e:
-        print(f"Failed to sync commands: {e}")
-     
+        print(f" [Slash Commands] Failed to sync commands: {e}")
+
+    # Cache invites for all guilds to track invite counts accurately
     for guild in bot.guilds:
         try:
             invites_cache[guild.id] = await guild.invites()
-        except Exception:
-            pass
+            print(f" [Invite Cache] Cached invites for guild: {guild.name}")
+        except Exception as e:
+            print(f" [Invite Cache] Could not cache invites for {guild.name}: {e}")
 
-# ==================== HYBRID PREFIX / SLASH SUPPORT WRAPPER ====================
+    print(f"==================================================")
+
+
+# ==============================================================================
+# HYBRID PREFIX & SLASH COMMAND WRAPPER
+# ==============================================================================
 
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
-    
+
+    # Check for anti-spam heuristics
+    user_id = message.author.id
+    guild = message.guild
+
+    if guild and not is_whitelisted(message.author, guild):
+        current_time = datetime.now().timestamp()
+        if user_id not in spam_tracking:
+            spam_tracking[user_id] = []
+
+        # Filter timestamps within the last 5 seconds
+        spam_tracking[user_id] = [t for t in spam_tracking[user_id] if current_time - t < 5]
+        spam_tracking[user_id].append(current_time)
+
+        if len(spam_tracking[user_id]) >= spam_limit:
+            try:
+                duration = timedelta(minutes=5)
+                await message.author.timeout(duration, reason="Anti-Spam: Sending messages too quickly.")
+                spam_tracking[user_id] = []
+                warning_msg = await message.channel.send(
+                    f"⚠️ {message.author.mention} has been **timed out for 5 minutes** for spamming."
+                )
+                await asyncio.sleep(6)
+                await warning_msg.delete()
+            except Exception:
+                pass
+
+    # Process traditional prefix commands if message starts with prefix
     if message.content.startswith(custom_prefix):
         ctx = await bot.get_context(message)
         if ctx.command:
@@ -84,153 +156,250 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
-# ==================== TICKET EDITABLE SYSTEM ====================
+# ==============================================================================
+# ANTI-NUKE MONITORING EVENTS
+# ==============================================================================
 
-class TicketSetupModal(Modal, title="Edit Ticket Options & Questions"):
-    option_label = TextInput(
-        label="Option Label",
-        placeholder="e.g. Support, Billing",
-        default="Support",
-        max_length=100
-    )
-    option_desc = TextInput(
-        label="Option Description",
-        placeholder="Brief description of this ticket type",
-        default="Open a support ticket",
-        max_length=200
-    )
-    option_questions = TextInput(
-        label="Questions (Separated by comma ,)",
-        style=discord.TextStyle.paragraph,
-        placeholder="What is your issue?, Provide details",
-        default="What is your issue?",
-        max_length=1000
-    )
+@bot.event
+async def on_member_ban(guild: discord.Guild, user: discord.User):
+    try:
+        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
+            executor = entry.user
+            if executor.bot or is_whitelisted(executor, guild):
+                return
+
+            current_time = datetime.now().timestamp()
+            if executor.id not in nuke_tracking:
+                nuke_tracking[executor.id] = {"bans": [], "channels": []}
+
+            # Clean up old timestamps (2 minutes window)
+            nuke_tracking[executor.id]["bans"] = [t for t in nuke_tracking[executor.id]["bans"] if current_time - t < 120]
+            nuke_tracking[executor.id]["bans"].append(current_time)
+
+            if len(nuke_tracking[executor.id]["bans"]) >= ban_limit:
+                await guild.ban(executor, reason="Anti-Nuke Triggered: Mass banning members.")
+                alert_channel = guild.system_channel
+                if alert_channel:
+                    await alert_channel.send(
+                        f"🚨 **ANTI-NUKE ACTIVATED** 🚨\nUser {executor.mention} was automatically banned for mass banning members."
+                    )
+            break
+    except Exception as e:
+        print(f"Error in on_member_ban anti-nuke: {e}")
+
+
+@bot.event
+async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
+    guild = channel.guild
+    try:
+        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
+            executor = entry.user
+            if executor.bot or is_whitelisted(executor, guild):
+                return
+
+            current_time = datetime.now().timestamp()
+            if executor.id not in nuke_tracking:
+                nuke_tracking[executor.id] = {"bans": [], "channels": []}
+
+            # Clean up old timestamps (2 minutes window)
+            nuke_tracking[executor.id]["channels"] = [t for t in nuke_tracking[executor.id]["channels"] if current_time - t < 120]
+            nuke_tracking[executor.id]["channels"].append(current_time)
+
+            if len(nuke_tracking[executor.id]["channels"]) >= channel_limit:
+                await guild.ban(executor, reason="Anti-Nuke Triggered: Mass deleting channels.")
+                alert_channel = guild.system_channel
+                if alert_channel:
+                    await alert_channel.send(
+                        f"🚨 **ANTI-NUKE ACTIVATED** 🚨\nUser {executor.mention} was automatically banned for mass deleting channels."
+                    )
+            break
+    except Exception as e:
+        print(f"Error in on_guild_channel_delete anti-nuke: {e}")
+
+
+# ==============================================================================
+# ADVANCED TICKET SYSTEM WITH DROPDOWNS & MODALS
+# ==============================================================================
+
+class TicketModal(Modal):
+    def __init__(self, ticket_type: str, questions: list):
+        super().__init__(title=f"{ticket_type} Ticket Form")
+        self.ticket_type = ticket_type
+        self.question_inputs = []
+
+        for idx, q in enumerate(questions):
+            truncated_label = q[:45] + "..." if len(q) > 48 else q
+            text_input = TextInput(
+                label=truncated_label,
+                placeholder="Type your answer here...",
+                style=discord.TextStyle.paragraph,
+                required=True,
+                max_length=500
+            )
+            self.question_inputs.append((q, text_input))
+            self.add_item(text_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        global ticket_options
-        questions_list = [q.strip() for q in self.option_questions.value.split(",") if q.strip()]
-        
-        found = False
-        for opt in ticket_options:
-            if opt["label"].lower() == self.option_label.value.strip().lower():
-                opt["description"] = self.option_desc.value.strip()
-                opt["questions"] = questions_list
-                found = True
-                break
-        
-        if not found:
-            ticket_options.append({
-                "label": self.option_label.value.strip(),
-                "description": self.option_desc.value.strip(),
-                "questions": questions_list
-            })
+        await interaction.response.defer(ephemeral=True)
 
-        await interaction.response.send_message(
-            f"✅ **Ticket Option Updated/Added Successfully!**\n🏷️ **Label:** `{self.option_label.value}`\n📝 **Questions Count:** `{len(questions_list)}`",
-            ephemeral=True
+        guild = interaction.guild
+        user = interaction.user
+
+        # Create overwrites for ticket channel
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True)
+        }
+
+        # Attempt to put in category if any exists
+        category = interaction.channel.category if isinstance(interaction.channel, discord.TextChannel) else None
+
+        ticket_channel_name = f"ticket-{user.name}".lower().replace(" ", "-")
+        ticket_channel = await guild.create_text_channel(
+            name=ticket_channel_name,
+            category=category,
+            overwrites=overwrites,
+            reason=f"Support ticket opened by {user}"
         )
+
+        # Build responses embed
+        embed = discord.Embed(
+            title=f"🎫 {self.ticket_type} Ticket",
+            description=f"Ticket opened by {user.mention}\nPlease wait patiently for staff assistance.",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc)
+        )
+
+        for q, text_input in self.question_inputs:
+            embed.add_field(name=q, value=text_input.value, inline=False)
+
+        embed.set_footer(text=f"User ID: {user.id}")
+
+        close_view = TicketControlView()
+        ping_content = custom_ticket_ping.replace("{user}", user.mention).replace("{role}", "@here")
+
+        await ticket_channel.send(content=ping_content, embed=embed, view=close_view)
+        await interaction.followup.send(f"✅ Your ticket has been created successfully: {ticket_channel.mention}", ephemeral=True)
+
 
 class TicketDropdown(discord.ui.Select):
     def __init__(self):
-        options = []
-        for opt in ticket_options:
-            options.append(discord.SelectOption(label=opt["label"], description=opt["description"]))
-        super().__init__(placeholder="Select a ticket type to open...", min_values=1, max_values=1, options=options)
+        options = [
+            discord.SelectOption(
+                label="Player Report",
+                description="Report a player for rule-breaking or misconduct",
+                emoji="⚖️",
+                value="Player Report"
+            ),
+            discord.SelectOption(
+                label="Bug Report",
+                description="Report a server glitch, bug, or exploit",
+                emoji="🐛",
+                value="Bug Report"
+            )
+        ]
+        super().__init__(placeholder="Select ticket category...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        selected_option = self.values[0]
-        opt_data = next((opt for opt in ticket_options if opt["label"] == selected_option), None)
-        
-        overwrites = {
-            interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-            interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True)
-        }
-        
-        category = interaction.channel.category
-        ticket_channel = await interaction.guild.create_text_channel(
-            name=f"ticket-{interaction.user.name}",
-            category=category,
-            overwrites=overwrites
-        )
+        selected = self.values[0]
+        if selected == "Player Report":
+            questions = [
+                "What is the username/ID of the player you are reporting?",
+                "What rule did they break or what did they do?",
+                "Provide evidence (imgur links, video clips, screenshots):"
+            ]
+        elif selected == "Bug Report":
+            questions = [
+                "Where did you encounter the bug?",
+                "Describe how the bug occurred step-by-step:",
+                "Can you replicate this bug consistently?"
+            ]
+        else:
+            questions = ["Describe your issue in detail:"]
 
-        ping_msg = custom_ticket_ping.replace("{user}", interaction.user.mention).replace("{role}", "@here")
-        embed = discord.Embed(
-            title=f"Ticket: {selected_option}",
-            description=f"Welcome {interaction.user.mention}!\nPlease answer the following questions:\n",
-            color=discord.Color.blue()
-        )
-        
-        if opt_data and opt_data["questions"]:
-            for i, q in enumerate(opt_data["questions"], 1):
-                embed.add_field(name=f"Question {i}", value=q, inline=False)
+        modal = TicketModal(ticket_type=selected, questions=questions)
+        await interaction.response.send_modal(modal)
 
-        await ticket_channel.send(content=ping_msg, embed=embed)
-        await interaction.response.send_message(f"✅ Ticket created: {ticket_channel.mention}", ephemeral=True)
 
 class TicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(TicketDropdown())
 
-@bot.tree.command(name="setup_ticket", description="Launch interactive setup wizard for clean ticket panel UI")
-@bot.command(name="setup_ticket", help="Launch interactive setup wizard for clean ticket panel UI")
-@app_commands.checks.has_permissions(administrator=True)
-async def setup_ticket(ctx_or_interaction, role: discord.Role = None, category: discord.CategoryChannel = None):
+
+class TicketControlView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="close_ticket_btn")
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("🔒 Ticket closing in 5 seconds...", ephemeral=False)
+        
+        # Transcript logging logic if log channel is configured
+        if ticket_log_channel_id:
+            log_chan = interaction.guild.get_channel(ticket_log_channel_id)
+            if log_chan:
+                try:
+                    messages = [msg async for msg in interaction.channel.history(limit=100, oldest_first=True)]
+                    transcript_content = f"Transcript for #{interaction.channel.name} (Closed by {interaction.user})\n\n"
+                    for m in messages:
+                        transcript_content += f"[{m.created_at.strftime('%Y-%m-%d %H:%M:%S')}] {m.author}: {m.content}\n"
+                    
+                    file_path = f"transcript_{interaction.channel.id}.txt"
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(transcript_content)
+
+                    await log_chan.send(
+                        f"📁 **Transcript for closed ticket:** `#{interaction.channel.name}`",
+                        file=discord.File(file_path)
+                    )
+                    os.remove(file_path)
+                except Exception as e:
+                    print(f"Failed to generate transcript: {e}")
+
+        await asyncio.sleep(5)
+        try:
+            await interaction.channel.delete(reason=f"Ticket closed by {interaction.user}")
+        except Exception:
+            pass
+
+
+# ==============================================================================
+# GIVEAWAY SYSTEM WITH FIXED / CUSTOM WINNER LOGIC
+# ==============================================================================
+
+@bot.tree.command(name="giveaway", description="Start an interactive giveaway with optional fixed winner.")
+@app_commands.describe(
+    prize="The prize being given away",
+    duration="Duration format (e.g. 30s, 10m, 2h, 1d)",
+    winners_count="Number of winners to pick",
+    fixed_winner="Optional specific member to guarantee as a winner"
+)
+@bot.command(name="giveaway", help="Start a giveaway")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def giveaway_slash(
+    ctx_or_interaction, 
+    prize: str, 
+    duration: str, 
+    winners_count: int = 1, 
+    fixed_winner: discord.Member = None
+):
     is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
+    channel = ctx_or_interaction.channel if is_interaction else ctx_or_interaction.message.channel
     author = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
     guild = ctx_or_interaction.guild
 
-    if not is_whitelisted(author, guild) and not author.guild_permissions.administrator:
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction:
-            await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else:
-            await ctx_or_interaction.send(msg)
-        return
-
-    embed = discord.Embed(
-        title="Support Ticket Panel",
-        description="Select an option from the dropdown menu below to open a ticket.",
-        color=discord.Color.blue()
-    )
-    view = TicketView()
-    if is_interaction:
-        await ctx_or_interaction.response.send_message(embed=embed, view=view)
-    else:
-        await ctx_or_interaction.send(embed=embed, view=view)
-
-@bot.tree.command(name="edit_ticket_options", description="Directly edit ticket options and questions without rebuilding setup.")
-@bot.command(name="edit_ticket_options", help="Directly edit ticket options and questions")
-@app_commands.checks.has_permissions(administrator=True)
-async def edit_ticket_options(ctx_or_interaction):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    if is_interaction:
-        await ctx_or_interaction.response.send_modal(TicketSetupModal())
-    else:
-        await ctx_or_interaction.send("⚠️ Please use the slash command `/edit_ticket_options` to open the interactive edit modal.")
-
-
-# ==================== GIVEAWAY LOGIC ====================
-
-@bot.tree.command(name="giveaway", description="Start a giveaway with optional fixed/custom winner.")
-@bot.command(name="giveaway", help="Start a giveaway")
-@app_commands.checks.has_permissions(manage_guild=True)
-async def giveaway(ctx_or_interaction, prize: str, duration: str, winners_count: int = 1, fixed_winner: discord.Member = None):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    channel = ctx_or_interaction.channel if is_interaction else ctx_or_interaction.message.channel
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-
     seconds = parse_time(duration)
-    
+
     embed = discord.Embed(
-        title="GIVEAWAY",
-        description=f"**Prize:** {prize}\n**Winner(s):** `{winners_count}`\n**Hosted by:** {user.mention}\n\nReact with 🎉 to enter!",
-        color=discord.Color.gold()
+        title="🎉 GIVEAWAY TIME! 🎉",
+        description=f"**Prize:** {prize}\n**Winner(s):** `{winners_count}`\n**Hosted by:** {author.mention}\n\nReact with 🎉 to enter!",
+        color=discord.Color.gold(),
+        timestamp=datetime.now(timezone.utc)
     )
     embed.set_footer(text=f"Ends in {duration}")
-    
+
     if is_interaction:
         await ctx_or_interaction.response.send_message(embed=embed)
         msg = await ctx_or_interaction.original_response()
@@ -246,7 +415,6 @@ async def giveaway(ctx_or_interaction, prize: str, duration: str, winners_count:
         return
 
     reaction = discord.utils.get(msg.reactions, emoji="🎉")
-    
     participants = []
     if reaction:
         async for u in reaction.users():
@@ -258,7 +426,6 @@ async def giveaway(ctx_or_interaction, prize: str, duration: str, winners_count:
         chosen_winners.append(fixed_winner)
         participants.remove(fixed_winner.id)
 
-    guild = ctx_or_interaction.guild
     while len(chosen_winners) < winners_count and participants:
         winner_id = random.choice(participants)
         participants.remove(winner_id)
@@ -268,23 +435,27 @@ async def giveaway(ctx_or_interaction, prize: str, duration: str, winners_count:
 
     if chosen_winners:
         winners_mention = ", ".join([w.mention for w in chosen_winners])
-        result_embed = discord.Embed(
-            title="GIVEAWAY ENDED",
-            description=f"**Prize:** {prize}\n**Winner(s):** {winners_mention} 🏆",
-            color=discord.Color.green()
+        ended_embed = discord.Embed(
+            title="🎉 GIVEAWAY ENDED 🎉",
+            description=f"**Prize:** {prize}\n**Winner(s):** {winners_mention} 🏆\n**Hosted by:** {author.mention}",
+            color=discord.Color.green(),
+            timestamp=datetime.now(timezone.utc)
         )
-        await msg.edit(embed=result_embed, view=None)
-        await channel.send(f"Congratulations {winners_mention}! You won **{prize}**!")
+        await msg.edit(embed=ended_embed, view=None)
+        await channel.send(f"🎊 Congratulations {winners_mention}! You won **{prize}**!")
     else:
-        result_embed = discord.Embed(
-            title="GIVEAWAY ENDED",
+        ended_embed = discord.Embed(
+            title="🎉 GIVEAWAY ENDED 🎉",
             description=f"**Prize:** {prize}\n❌ No valid participants found.",
-            color=discord.Color.red()
+            color=discord.Color.red(),
+            timestamp=datetime.now(timezone.utc)
         )
-        await msg.edit(embed=result_embed, view=None)
+        await msg.edit(embed=ended_embed, view=None)
 
 
-# ==================== CONFIGURATION & ADMIN COMMANDS ====================
+# ==============================================================================
+# CONFIGURATION COMMANDS (ANTI-NUKE, PREFIX, LIMITS)
+# ==============================================================================
 
 @bot.tree.command(name="set_ban_limit", description="Set anti-nuke max ban threshold limit.")
 @bot.command(name="set_ban_limit")
@@ -294,7 +465,7 @@ async def set_ban_limit(ctx_or_interaction, limit: int):
     user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
     guild = ctx_or_interaction.guild
 
-    if not is_whitelisted(user, guild) and not user.guild_permissions.administrator:
+    if not is_whitelisted(user, guild):
         msg = "❌ **Access Denied:** You need administrator permissions."
         if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
         else: await ctx_or_interaction.send(msg)
@@ -315,7 +486,7 @@ async def set_channel_limit(ctx_or_interaction, limit: int):
     user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
     guild = ctx_or_interaction.guild
 
-    if not is_whitelisted(user, guild) and not user.guild_permissions.administrator:
+    if not is_whitelisted(user, guild):
         msg = "❌ **Access Denied:** You need administrator permissions."
         if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
         else: await ctx_or_interaction.send(msg)
@@ -336,7 +507,7 @@ async def set_spam_limit(ctx_or_interaction, messages_count: int):
     user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
     guild = ctx_or_interaction.guild
 
-    if not is_whitelisted(user, guild) and not user.guild_permissions.administrator:
+    if not is_whitelisted(user, guild):
         msg = "❌ **Access Denied:** You need administrator permissions."
         if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
         else: await ctx_or_interaction.send(msg)
@@ -357,7 +528,7 @@ async def set_prefix(ctx_or_interaction, prefix: str):
     user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
     guild = ctx_or_interaction.guild
 
-    if not is_whitelisted(user, guild) and not user.guild_permissions.administrator:
+    if not is_whitelisted(user, guild):
         msg = "❌ **Access Denied:** You need administrator permissions."
         if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
         else: await ctx_or_interaction.send(msg)
@@ -371,31 +542,6 @@ async def set_prefix(ctx_or_interaction, prefix: str):
     else: await ctx_or_interaction.send(res)
 
 
-@bot.tree.command(name="role", description="Assign or remove a role from a member easily.")
-@bot.command(name="role")
-@app_commands.checks.has_permissions(manage_roles=True)
-async def role_cmd(ctx_or_interaction, action: Literal["add", "remove"], member: discord.Member, role: discord.Role):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild) and not user.guild_permissions.manage_roles:
-        msg = "❌ **Access Denied:** You lack role management permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-
-    if action == "add":
-        await member.add_roles(role, reason=f"Managed by {user}")
-        res = f"✅ Successfully added **{role.name}** to {member.mention}!"
-    else:
-        await member.remove_roles(role, reason=f"Managed by {user}")
-        res = f"✅ Successfully removed **{role.name}** from {member.mention}!"
-
-    if is_interaction: await ctx_or_interaction.response.send_message(res)
-    else: await ctx_or_interaction.send(res)
-
-
 @bot.tree.command(name="ticket_log_channel", description="Set log channel for closed ticket transcripts.")
 @bot.command(name="ticket_log_channel")
 @app_commands.checks.has_permissions(administrator=True)
@@ -404,7 +550,7 @@ async def ticket_log_channel(ctx_or_interaction, channel: discord.TextChannel):
     user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
     guild = ctx_or_interaction.guild
 
-    if not is_whitelisted(user, guild) and not user.guild_permissions.administrator:
+    if not is_whitelisted(user, guild):
         msg = "❌ **Access Denied:** You need administrator permissions."
         if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
         else: await ctx_or_interaction.send(msg)
@@ -425,7 +571,7 @@ async def set_ticket_ping(ctx_or_interaction, message: str):
     user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
     guild = ctx_or_interaction.guild
 
-    if not is_whitelisted(user, guild) and not user.guild_permissions.administrator:
+    if not is_whitelisted(user, guild):
         msg = "❌ **Access Denied:** You need administrator permissions."
         if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
         else: await ctx_or_interaction.send(msg)
@@ -438,6 +584,117 @@ async def set_ticket_ping(ctx_or_interaction, message: str):
     else: await ctx_or_interaction.send(res)
 
 
+@bot.tree.command(name="setup_ticket", description="Send ticket panel interface with dropdown menu.")
+@bot.command(name="setup_ticket")
+@app_commands.checks.has_permissions(administrator=True)
+async def setup_ticket(ctx_or_interaction):
+    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
+    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
+    guild = ctx_or_interaction.guild
+
+    if not is_whitelisted(user, guild):
+        msg = "❌ **Access Denied:** You need administrator permissions."
+        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
+        else: await ctx_or_interaction.send(msg)
+        return
+
+    embed = discord.Embed(
+        title="support Ticket Panel",
+        description="Select an option from the dropdown menu below to open a ticket.",
+        color=discord.Color.blue()
+    )
+    view = TicketView()
+    if is_interaction:
+        await ctx_or_interaction.response.send_message(embed=embed, view=view)
+    else:
+        await ctx_or_interaction.send(embed=embed, view=view)
+
+
+# ==============================================================================
+# WELCOME SYSTEM & INVITE TRACKER COMMANDS
+# ==============================================================================
+
+class SimpleWelcomeModal(Modal, title="Configure Welcome Message"):
+    wel_msg = TextInput(
+        label="Welcome Message",
+        style=discord.TextStyle.paragraph,
+        default="Hey {user}, welcome to **{server}**! Member count: {count}",
+        max_length=1000
+    )
+    wel_img = TextInput(
+        label="Banner Image URL (Optional)",
+        required=False,
+        placeholder="Paste image link here or leave blank",
+        default=""
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        global custom_welcome_msg, custom_welcome_img, welcome_enabled
+        custom_welcome_msg = self.wel_msg.value
+        custom_welcome_img = self.wel_img.value.strip() if self.wel_img.value else None
+        welcome_enabled = True
+
+        await interaction.response.send_message(
+            f"✅ **Welcome system fully updated!**\n\n💬 **Message:** `{custom_welcome_msg}`",
+            ephemeral=True
+        )
+
+
+class WelcomeSelectView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="Select Welcome Channel...", channel_types=[discord.ChannelType.text], min_values=1, max_values=1)
+    async def select_channel(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        selected_channel = select.values[0]
+        global welcome_channel_id
+        welcome_channel_id = selected_channel.id
+        await interaction.response.send_modal(SimpleWelcomeModal())
+
+
+@bot.tree.command(name="setup_welcome", description="Configure custom welcome channel, message and banner.")
+@bot.command(name="setup_welcome")
+@app_commands.checks.has_permissions(administrator=True)
+async def setup_welcome(ctx_or_interaction):
+    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
+    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
+    guild = ctx_or_interaction.guild
+
+    if not is_whitelisted(user, guild):
+        msg = "❌ **Access Denied:** You need administrator permissions."
+        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
+        else: await ctx_or_interaction.send(msg)
+        return
+
+    view = WelcomeSelectView()
+    msg = "📌 **Please select your welcome channel from the dropdown below:**"
+    if is_interaction:
+        await ctx_or_interaction.response.send_message(msg, view=view, ephemeral=True)
+    else:
+        await ctx_or_interaction.send(msg, view=view)
+
+
+@bot.tree.command(name="disable_welcome", description="Turn off welcome system.")
+@bot.command(name="disable_welcome")
+@app_commands.checks.has_permissions(administrator=True)
+async def disable_welcome(ctx_or_interaction):
+    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
+    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
+    guild = ctx_or_interaction.guild
+
+    if not is_whitelisted(user, guild):
+        msg = "❌ **Access Denied:** You need administrator permissions."
+        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
+        else: await ctx_or_interaction.send(msg)
+        return
+
+    global welcome_enabled
+    welcome_enabled = False
+    res = "❌ **Welcome system has been disabled.**"
+    if is_interaction: await ctx_or_interaction.response.send_message(res)
+    else: await ctx_or_interaction.send(res)
+
+
 @bot.tree.command(name="setup_invitelog", description="Set channel for invite logs.")
 @bot.command(name="setup_invitelog")
 @app_commands.checks.has_permissions(administrator=True)
@@ -446,7 +703,7 @@ async def setup_invitelog(ctx_or_interaction, channel: discord.TextChannel = Non
     user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
     guild = ctx_or_interaction.guild
 
-    if not is_whitelisted(user, guild) and not user.guild_permissions.administrator:
+    if not is_whitelisted(user, guild):
         msg = "❌ **Access Denied:** You need administrator permissions."
         if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
         else: await ctx_or_interaction.send(msg)
@@ -487,133 +744,11 @@ async def invites(ctx_or_interaction, member: discord.Member = None):
         await ctx_or_interaction.send(embed=embed)
 
 
-@bot.tree.command(name="dmall", description="Send DM announcement to all server members.")
-@app_commands.describe(message="The message you want to broadcast", as_embed="True for Embed format, False for Plain Text")
-@bot.command(name="dmall")
-@app_commands.checks.has_permissions(administrator=True)
-async def dmall(ctx_or_interaction, message: str, as_embed: bool = False):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
+# ==============================================================================
+# MODERATION TOOLS & BROADCAST COMMANDS
+# ==============================================================================
 
-    if not is_whitelisted(user, guild) and not user.guild_permissions.administrator:
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-        
-    format_type = "Embed" if as_embed else "Plain Text"
-    start_msg = f"⏳ **Starting DM Broadcast ({format_type})...** Safe delay active."
-    if is_interaction:
-        await ctx_or_interaction.response.send_message(start_msg)
-    else:
-        await ctx_or_interaction.send(start_msg)
-
-    success_count, failed_count = 0, 0
-    for member in guild.members:
-        if member.bot: continue
-        try:
-            if as_embed:
-                embed = discord.Embed(title=f"Announcement from {guild.name}", description=message, color=discord.Color.gold())
-                await member.send(embed=embed)
-            else:
-                await member.send(content=message)
-            success_count += 1
-            await asyncio.sleep(1.5)
-        except Exception:
-            failed_count += 1
-
-    end_msg = f"✅ Sent ({format_type}): {success_count} | ❌ Failed: {failed_count}"
-    if is_interaction:
-        await ctx_or_interaction.followup.send(end_msg)
-    else:
-        await ctx_or_interaction.send(end_msg)
-
-
-# ==================== WELCOME SYSTEM & MODALS ====================
-
-class SimpleWelcomeModal(Modal, title="Configure Welcome Message"):
-    wel_msg = TextInput(
-        label="Welcome Message", 
-        style=discord.TextStyle.paragraph, 
-        default="Hey {user}, welcome to **{server}**! Member count: {count}", 
-        max_length=1000
-    )
-    wel_img = TextInput(
-        label="Banner Image URL (Optional)", 
-        required=False, 
-        placeholder="Paste image link here or leave blank",
-        default=""
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
-        global custom_welcome_msg, custom_welcome_img, welcome_enabled
-        custom_welcome_msg = self.wel_msg.value
-        custom_welcome_img = self.wel_img.value.strip() if self.wel_img.value else None
-        welcome_enabled = True
-        
-        await interaction.response.send_message(
-            f"✅ **Welcome system fully updated!**\n\n💬 **Message:** `{custom_welcome_msg}`", 
-            ephemeral=True
-        )
-
-
-class WelcomeSelectView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=60)
-
-    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="Select Welcome Channel...", channel_types=[discord.ChannelType.text], min_values=1, max_values=1)
-    async def select_channel(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
-        selected_channel = select.values[0]
-        global welcome_channel_id
-        welcome_channel_id = selected_channel.id
-        await interaction.response.send_modal(SimpleWelcomeModal())
-
-
-@bot.tree.command(name="setup_welcome", description="Configure custom welcome channel, message and banner.")
-@bot.command(name="setup_welcome")
-@app_commands.checks.has_permissions(administrator=True)
-async def setup_welcome(ctx_or_interaction):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild) and not user.guild_permissions.administrator:
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-    
-    view = WelcomeSelectView()
-    msg = "📌 **Please select your welcome channel from the dropdown below:**"
-    if is_interaction:
-        await ctx_or_interaction.response.send_message(msg, view=view, ephemeral=True)
-    else:
-        await ctx_or_interaction.send(msg, view=view)
-
-
-@bot.tree.command(name="disable_welcome", description="Turn off welcome system.")
-@bot.command(name="disable_welcome")
-@app_commands.checks.has_permissions(administrator=True)
-async def disable_welcome(ctx_or_interaction):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild) and not user.guild_permissions.administrator:
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-
-    global welcome_enabled
-    welcome_enabled = False
-    res = "❌ **Welcome system has been disabled.**"
-    if is_interaction: await ctx_or_interaction.response.send_message(res)
-    else: await ctx_or_interaction.send(res)
-
-
-@bot.tree.command(name="ban", description="Ban a member.")
+@bot.tree.command(name="ban", description="Permanently ban a member.")
 @bot.command(name="ban")
 @app_commands.checks.has_permissions(ban_members=True)
 async def ban_cmd(ctx_or_interaction, member: discord.Member, reason: str = "No reason provided"):
@@ -633,12 +768,12 @@ async def ban_cmd(ctx_or_interaction, member: discord.Member, reason: str = "No 
         return
 
     await member.ban(reason=reason)
-    res = f"🔨 **{member.mention} banned!**"
+    res = f"🔨 **{member.mention} banned successfully!**"
     if is_interaction: await ctx_or_interaction.response.send_message(res)
     else: await ctx_or_interaction.send(res)
 
 
-@bot.tree.command(name="mute", description="Timeout a member.")
+@bot.tree.command(name="mute", description="Timeout a member for a specified duration.")
 @bot.command(name="mute")
 @app_commands.checks.has_permissions(moderate_members=True)
 async def mute_cmd(ctx_or_interaction, member: discord.Member, duration: str, reason: str = "No reason provided"):
@@ -693,7 +828,77 @@ async def purge_cmd(ctx_or_interaction, amount: int):
         await ctx_or_interaction.send(f"🧹 Successfully deleted **{len(deleted)}** messages!", delete_after=5)
 
 
-# ==================== WELCOME & INVITE EVENT LOGIC ====================
+@bot.tree.command(name="role", description="Assign or remove a role from a member easily.")
+@bot.command(name="role")
+@app_commands.checks.has_permissions(manage_roles=True)
+async def role_cmd(ctx_or_interaction, action: Literal["add", "remove"], member: discord.Member, role: discord.Role):
+    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
+    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
+    guild = ctx_or_interaction.guild
+
+    if not is_whitelisted(user, guild) and not user.guild_permissions.manage_roles:
+        msg = "❌ **Access Denied:** You lack role management permissions."
+        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
+        else: await ctx_or_interaction.send(msg)
+        return
+
+    if action == "add":
+        await member.add_roles(role, reason=f"Managed by {user}")
+        res = f"✅ Successfully added **{role.name}** to {member.mention}!"
+    else:
+        await member.remove_roles(role, reason=f"Managed by {user}")
+        res = f"✅ Successfully removed **{role.name}** from {member.mention}!"
+
+    if is_interaction: await ctx_or_interaction.response.send_message(res)
+    else: await ctx_or_interaction.send(res)
+
+
+@bot.tree.command(name="dmall", description="Send DM announcement to all server members.")
+@app_commands.describe(message="The message you want to broadcast", as_embed="True for Embed format, False for Plain Text")
+@bot.command(name="dmall")
+@app_commands.checks.has_permissions(administrator=True)
+async def dmall(ctx_or_interaction, message: str, as_embed: bool = False):
+    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
+    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
+    guild = ctx_or_interaction.guild
+
+    if not is_whitelisted(user, guild):
+        msg = "❌ **Access Denied:** You need administrator permissions."
+        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
+        else: await ctx_or_interaction.send(msg)
+        return
+        
+    format_type = "Embed" if as_embed else "Plain Text"
+    start_msg = f"⏳ **Starting DM Broadcast ({format_type})...** Safe delay active."
+    if is_interaction:
+        await ctx_or_interaction.response.send_message(start_msg)
+    else:
+        await ctx_or_interaction.send(start_msg)
+
+    success_count, failed_count = 0, 0
+    for member in guild.members:
+        if member.bot: continue
+        try:
+            if as_embed:
+                embed = discord.Embed(title=f"Announcement from {guild.name}", description=message, color=discord.Color.gold())
+                await member.send(embed=embed)
+            else:
+                await member.send(content=message)
+            success_count += 1
+            await asyncio.sleep(1.5)
+        except Exception:
+            failed_count += 1
+
+    end_msg = f"✅ Sent ({format_type}): {success_count} | ❌ Failed: {failed_count}"
+    if is_interaction:
+        await ctx_or_interaction.followup.send(end_msg)
+    else:
+        await ctx_or_interaction.send(end_msg)
+
+
+# ==============================================================================
+# MEMBER JOIN EVENT: WELCOME & INVITE TRACKER EXECUTION
+# ==============================================================================
 
 @bot.event
 async def on_member_join(member):
@@ -752,9 +957,11 @@ async def on_member_join(member):
         await target_channel.send(content=f"Welcome {member.mention}!", embed=embed)
 
 
-# ==================== HELP COMMANDS ====================
+# ==============================================================================
+# HELP COMMANDS MODULE
+# ==============================================================================
 
-@bot.tree.command(name="antinuke_help", description="Show all Anti-Nuke and Anti-Spam configuration commands.")
+@bot.tree.command(name="antinuke_help", description="Show all Anti-Nuke configuration commands.")
 @bot.command(name="antinuke_help")
 async def help_antinuke(ctx_or_interaction):
     embed = discord.Embed(title="🛡️ Anti-Nuke & Anti-Spam Commands", color=discord.Color.red())
@@ -772,10 +979,9 @@ async def help_antinuke(ctx_or_interaction):
 @bot.command(name="ticket_help")
 async def help_ticket(ctx_or_interaction):
     embed = discord.Embed(title="🎫 Ticket System Commands", color=discord.Color.blue())
-    embed.add_field(name="/setup_ticket", value="Launch interactive setup wizard for clean ticket panel UI", inline=False)
-    embed.add_field(name="/edit_ticket_options", value="Directly edit ticket options and questions dynamically", inline=False)
-    embed.add_field(name="/ticket_log_channel <channel>", value="Set channel for closed ticket text transcripts", inline=False)
-    embed.add_field(name="/set_ticket_ping <msg>", value="Set custom ticket mention message", inline=False)
+    embed.add_field(name="/setup_ticket", value="Send ticket panel interface with dropdown", inline=False)
+    embed.add_field(name="/ticket_log_channel <channel>", value="Set channel for transcripts", inline=False)
+    embed.add_field(name="/set_ticket_ping <msg>", value="Set custom mention message", inline=False)
     
     if isinstance(ctx_or_interaction, discord.Interaction):
         await ctx_or_interaction.response.send_message(embed=embed)
@@ -787,7 +993,7 @@ async def help_ticket(ctx_or_interaction):
 @bot.command(name="giveaway_help")
 async def help_giveaway(ctx_or_interaction):
     embed = discord.Embed(title="🎉 Giveaway System Commands", color=discord.Color.gold())
-    embed.add_field(name="/giveaway <prize> <duration> [winners] [fixed_winner]", value="Start giveaway with optional fixed/custom winner", inline=False)
+    embed.add_field(name="/giveaway <prize> <duration> [winners] [fixed_winner]", value="Start giveaway with optional fixed winner", inline=False)
     
     if isinstance(ctx_or_interaction, discord.Interaction):
         await ctx_or_interaction.response.send_message(embed=embed)
@@ -799,7 +1005,7 @@ async def help_giveaway(ctx_or_interaction):
 @bot.command(name="welcome_help")
 async def help_welcome(ctx_or_interaction):
     embed = discord.Embed(title="👋 Welcome System Commands", color=discord.Color.green())
-    embed.add_field(name="/setup_welcome", value="Set welcome channel, message, and banner image via modal wizard", inline=False)
+    embed.add_field(name="/setup_welcome", value="Set welcome channel, message, and banner via interactive modal", inline=False)
     embed.add_field(name="/disable_welcome", value="Turn off welcome system", inline=False)
     
     if isinstance(ctx_or_interaction, discord.Interaction):
@@ -827,10 +1033,10 @@ async def help_mod(ctx_or_interaction):
     embed = discord.Embed(title="🔨 Moderation Commands", color=discord.Color.purple())
     embed.add_field(name="/ban <member> [reason]", value="Permanently ban a member", inline=False)
     embed.add_field(name="/mute <member> <time> [reason]", value="Timeout member (e.g. 10m, 1h)", inline=False)
-    embed.add_field(name="/purge <amount>", value="Clear up to 100 messages in channel", inline=False)
-    embed.add_field(name="/role <add/remove> <member> <role>", value="Quickly assign or remove roles", inline=False)
-    embed.add_field(name="/set_prefix <prefix>", value="Change bot command prefix", inline=False)
-    embed.add_field(name="/dmall <message>", value="Broadcast announcement via DMs", inline=False)
+    embed.add_field(name="/purge <amount>", value="Clear up to 100 messages", inline=False)
+    embed.add_field(name="/role <add/remove> <member> <role>", value="Manage roles quickly", inline=False)
+    embed.add_field(name="/set_prefix <prefix>", value="Change text prefix", inline=False)
+    embed.add_field(name="/dmall <message>", value="Broadcast DMs to server members", inline=False)
     
     if isinstance(ctx_or_interaction, discord.Interaction):
         await ctx_or_interaction.response.send_message(embed=embed)
@@ -838,9 +1044,12 @@ async def help_mod(ctx_or_interaction):
         await ctx_or_interaction.send(embed=embed)
 
 
-# ==================== RUN BOT ====================
+# ==============================================================================
+# KEEP ALIVE & BOT START EXECUTION
+# ==============================================================================
 
 keep_alive()
+
 BOT_TOKEN = os.getenv("DISCORD_TOKEN")
 if BOT_TOKEN:
     bot.run(BOT_TOKEN)
