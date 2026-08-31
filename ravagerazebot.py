@@ -780,18 +780,6 @@ async def slash_dmall(interaction: discord.Interaction, message: str, as_embed: 
     await interaction.followup.send(f"✅ Sent ({format_type}): {success_count} | ❌ Failed: {failed_count}")
 
 
-@bot.tree.command(name="setup_welcome", description="Set welcome channel.")
-@app_commands.checks.has_permissions(administrator=True)
-async def slash_setup_welcome(interaction: discord.Interaction, channel: discord.TextChannel = None):
-    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
-        return
-    global welcome_channel_id, welcome_enabled
-    target = channel or interaction.channel
-    welcome_channel_id = target.id
-    welcome_enabled = True
-    await interaction.response.send_message(f"✅ **Welcome channel set to:** {target.mention}")
-
 
 class SimpleWelcomeModal(Modal, title="Configure Welcome Message"):
     wel_msg = TextInput(
