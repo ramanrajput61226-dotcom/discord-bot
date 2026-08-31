@@ -1,458 +1,80 @@
-import os
-import random
-import asyncio
+import discord
+from discord.ext import commands
+from discord.app_commands import Choice
+from discord import app_commands
+from discord.ui import Modal, TextInput, Select, View
 from datetime import datetime, timezone, timedelta
 from typing import Literal
-
-import discord
-from discord import app_commands
-from discord.ext import commands
-from discord.ui import Modal, TextInput
-
-# Try importing keep_alive if running on Replit or similar hosting services
-try:
-    from keep_alive import keep_alive
-except ImportError:
-    def keep_alive():
-        pass
-
+import asyncio
+import os
+import io
 
 # ==============================================================================
-# GLOBAL STATES & CONFIGURATIONS
-# ==============================================================================
-
-ban_limit = 5
-channel_limit = 3
-spam_limit = 5
-custom_prefix = "!"
-
-ticket_log_channel_id = None
-custom_ticket_ping = "{role}"
-
-invite_log_channel_id = None
-welcome_channel_id = None
-custom_welcome_msg = None
-custom_welcome_img = None
-welcome_enabled = False
-
-invites_cache = {}
-
-# Message tracking dictionary for spam detection: {user_id: [timestamps]}
-spam_tracking = {}
-
-# Active nuke tracking dictionary: {user_id: {'bans': [timestamps], 'channels': [timestamps]}}
-nuke_tracking = {}
-
-
-# ==============================================================================
-# BOT INITIALIZATION & INTENTS
+# BOT SETUP & INITIALIZATION
 # ==============================================================================
 
 intents = discord.Intents.default()
-intents.members = True
+intents.messages = True
 intents.guilds = True
-intents.invites = True
+intents.members = True
 intents.message_content = True
+intents.invites = True
 
-bot = commands.Bot(
-    command_prefix=commands.when_mentioned_or(custom_prefix),
-    intents=intents,
-    help_command=None
-)
+class HybridBot(commands.Bot):
+    def __init__(self):
+        super().__init__(command_prefix="!", intents=intents)
 
+    async def setup_hook(self):
+        await self.tree.sync()
+        print("🌍 Slash commands synced successfully.")
+
+bot = HybridBot()
+
+# Global Storage / Configuration Variables
+prefix = "!"
+ban_limit_threshold = 3
+channel_limit_threshold = 3
+spam_limit_threshold = 5
+
+ticket_log_channel_id = None
+custom_ticket_ping = "Support will be with you shortly."
+
+welcome_enabled = False
+welcome_channel_id = None
+custom_welcome_msg = "Hey {user}, welcome to **{server}**! Member count: {count}"
+custom_welcome_img = None
+invite_log_channel_id = None
+invites_cache = {}
 
 # ==============================================================================
-# HELPER FUNCTIONS & CHECKS
+# HELPER FUNCTIONS & ANTI-NUKE UTILS
 # ==============================================================================
 
 def is_whitelisted(user: discord.Member, guild: discord.Guild) -> bool:
-    """Check if a user is the bot owner or has administrator permissions."""
-    if user.id == OWNER_ID:
-        return True
-    if user.guild_permissions.administrator:
+    if user.id == guild.owner_id or user.guild_permissions.administrator:
         return True
     return False
 
-
-def parse_time(duration_str: str) -> int:
-    """Parse duration string like 10s, 5m, 2h, 1d into total seconds."""
+def parse_time(time_str: str) -> int:
     multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-    unit = duration_str[-1].lower()
-    val = duration_str[:-1]
-    if unit in multipliers and val.isdigit():
-        return int(val) * multipliers[unit]
-    return 60  # Default fallback 60 seconds
-
-
-# ==============================================================================
-# BOT EVENTS: ON_READY & CACHING
-# ==============================================================================
+    unit = time_str[-1].lower()
+    val = int(time_str[:-1])
+    return val * multipliers.get(unit, 1)
 
 @bot.event
 async def on_ready():
-    print(f"==================================================")
-    print(f" Logged in successfully as {bot.user}")
-    print(f" Bot ID: {bot.user.id}")
-    print(f"==================================================")
-
-    # Sync slash commands globally or per guild
-    try:
-        synced = await bot.tree.sync()
-        print(f" [Slash Commands] Successfully synced {len(synced)} command(s).")
-    except Exception as e:
-        print(f" [Slash Commands] Failed to sync commands: {e}")
-
-    # Cache invites for all guilds to track invite counts accurately
+    print(f"🤖 Logged in as {bot.user} (ID: {bot.user.id})")
     for guild in bot.guilds:
         try:
             invites_cache[guild.id] = await guild.invites()
-            print(f" [Invite Cache] Cached invites for guild: {guild.name}")
-        except Exception as e:
-            print(f" [Invite Cache] Could not cache invites for {guild.name}: {e}")
-
-    print(f"==================================================")
-
-
-# ==============================================================================
-# HYBRID PREFIX & SLASH COMMAND WRAPPER
-# ==============================================================================
-
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    # Check for anti-spam heuristics
-    user_id = message.author.id
-    guild = message.guild
-
-    if guild and not is_whitelisted(message.author, guild):
-        current_time = datetime.now().timestamp()
-        if user_id not in spam_tracking:
-            spam_tracking[user_id] = []
-
-        # Filter timestamps within the last 5 seconds
-        spam_tracking[user_id] = [t for t in spam_tracking[user_id] if current_time - t < 5]
-        spam_tracking[user_id].append(current_time)
-
-        if len(spam_tracking[user_id]) >= spam_limit:
-            try:
-                duration = timedelta(minutes=5)
-                await message.author.timeout(duration, reason="Anti-Spam: Sending messages too quickly.")
-                spam_tracking[user_id] = []
-                warning_msg = await message.channel.send(
-                    f"⚠️ {message.author.mention} has been **timed out for 5 minutes** for spamming."
-                )
-                await asyncio.sleep(6)
-                await warning_msg.delete()
-            except Exception:
-                pass
-
-    # Process traditional prefix commands if message starts with prefix
-    if message.content.startswith(custom_prefix):
-        ctx = await bot.get_context(message)
-        if ctx.command:
-            await bot.invoke(ctx)
-            return
-
-    await bot.process_commands(message)
-
-
-# ==============================================================================
-# ANTI-NUKE MONITORING EVENTS
-# ==============================================================================
-
-@bot.event
-async def on_member_ban(guild: discord.Guild, user: discord.User):
-    try:
-        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
-            executor = entry.user
-            if executor.bot or is_whitelisted(executor, guild):
-                return
-
-            current_time = datetime.now().timestamp()
-            if executor.id not in nuke_tracking:
-                nuke_tracking[executor.id] = {"bans": [], "channels": []}
-
-            # Clean up old timestamps (2 minutes window)
-            nuke_tracking[executor.id]["bans"] = [t for t in nuke_tracking[executor.id]["bans"] if current_time - t < 120]
-            nuke_tracking[executor.id]["bans"].append(current_time)
-
-            if len(nuke_tracking[executor.id]["bans"]) >= ban_limit:
-                await guild.ban(executor, reason="Anti-Nuke Triggered: Mass banning members.")
-                alert_channel = guild.system_channel
-                if alert_channel:
-                    await alert_channel.send(
-                        f"🚨 **ANTI-NUKE ACTIVATED** 🚨\nUser {executor.mention} was automatically banned for mass banning members."
-                    )
-            break
-    except Exception as e:
-        print(f"Error in on_member_ban anti-nuke: {e}")
-
-
-@bot.event
-async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
-    guild = channel.guild
-    try:
-        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-            executor = entry.user
-            if executor.bot or is_whitelisted(executor, guild):
-                return
-
-            current_time = datetime.now().timestamp()
-            if executor.id not in nuke_tracking:
-                nuke_tracking[executor.id] = {"bans": [], "channels": []}
-
-            # Clean up old timestamps (2 minutes window)
-            nuke_tracking[executor.id]["channels"] = [t for t in nuke_tracking[executor.id]["channels"] if current_time - t < 120]
-            nuke_tracking[executor.id]["channels"].append(current_time)
-
-            if len(nuke_tracking[executor.id]["channels"]) >= channel_limit:
-                await guild.ban(executor, reason="Anti-Nuke Triggered: Mass deleting channels.")
-                alert_channel = guild.system_channel
-                if alert_channel:
-                    await alert_channel.send(
-                        f"🚨 **ANTI-NUKE ACTIVATED** 🚨\nUser {executor.mention} was automatically banned for mass deleting channels."
-                    )
-            break
-    except Exception as e:
-        print(f"Error in on_guild_channel_delete anti-nuke: {e}")
-
-
-# ==============================================================================
-# ADVANCED TICKET SYSTEM WITH DROPDOWNS & MODALS
-# ==============================================================================
-
-class TicketModal(Modal):
-    def __init__(self, ticket_type: str, questions: list):
-        super().__init__(title=f"{ticket_type} Ticket Form")
-        self.ticket_type = ticket_type
-        self.question_inputs = []
-
-        for idx, q in enumerate(questions):
-            truncated_label = q[:45] + "..." if len(q) > 48 else q
-            text_input = TextInput(
-                label=truncated_label,
-                placeholder="Type your answer here...",
-                style=discord.TextStyle.paragraph,
-                required=True,
-                max_length=500
-            )
-            self.question_inputs.append((q, text_input))
-            self.add_item(text_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-
-        guild = interaction.guild
-        user = interaction.user
-
-        # Create overwrites for ticket channel
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True)
-        }
-
-        # Attempt to put in category if any exists
-        category = interaction.channel.category if isinstance(interaction.channel, discord.TextChannel) else None
-
-        ticket_channel_name = f"ticket-{user.name}".lower().replace(" ", "-")
-        ticket_channel = await guild.create_text_channel(
-            name=ticket_channel_name,
-            category=category,
-            overwrites=overwrites,
-            reason=f"Support ticket opened by {user}"
-        )
-
-        # Build responses embed
-        embed = discord.Embed(
-            title=f"🎫 {self.ticket_type} Ticket",
-            description=f"Ticket opened by {user.mention}\nPlease wait patiently for staff assistance.",
-            color=discord.Color.blue(),
-            timestamp=datetime.now(timezone.utc)
-        )
-
-        for q, text_input in self.question_inputs:
-            embed.add_field(name=q, value=text_input.value, inline=False)
-
-        embed.set_footer(text=f"User ID: {user.id}")
-
-        close_view = TicketControlView()
-        ping_content = custom_ticket_ping.replace("{user}", user.mention).replace("{role}", "@here")
-
-        await ticket_channel.send(content=ping_content, embed=embed, view=close_view)
-        await interaction.followup.send(f"✅ Your ticket has been created successfully: {ticket_channel.mention}", ephemeral=True)
-
-
-class TicketDropdown(discord.ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(
-                label="Player Report",
-                description="Report a player for rule-breaking or misconduct",
-                emoji="⚖️",
-                value="Player Report"
-            ),
-            discord.SelectOption(
-                label="Bug Report",
-                description="Report a server glitch, bug, or exploit",
-                emoji="🐛",
-                value="Bug Report"
-            )
-        ]
-        super().__init__(placeholder="Select ticket category...", min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        selected = self.values[0]
-        if selected == "Player Report":
-            questions = [
-                "What is the username/ID of the player you are reporting?",
-                "What rule did they break or what did they do?",
-                "Provide evidence (imgur links, video clips, screenshots):"
-            ]
-        elif selected == "Bug Report":
-            questions = [
-                "Where did you encounter the bug?",
-                "Describe how the bug occurred step-by-step:",
-                "Can you replicate this bug consistently?"
-            ]
-        else:
-            questions = ["Describe your issue in detail:"]
-
-        modal = TicketModal(ticket_type=selected, questions=questions)
-        await interaction.response.send_modal(modal)
-
-
-class TicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(TicketDropdown())
-
-
-class TicketControlView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="close_ticket_btn")
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("🔒 Ticket closing in 5 seconds...", ephemeral=False)
-        
-        # Transcript logging logic if log channel is configured
-        if ticket_log_channel_id:
-            log_chan = interaction.guild.get_channel(ticket_log_channel_id)
-            if log_chan:
-                try:
-                    messages = [msg async for msg in interaction.channel.history(limit=100, oldest_first=True)]
-                    transcript_content = f"Transcript for #{interaction.channel.name} (Closed by {interaction.user})\n\n"
-                    for m in messages:
-                        transcript_content += f"[{m.created_at.strftime('%Y-%m-%d %H:%M:%S')}] {m.author}: {m.content}\n"
-                    
-                    file_path = f"transcript_{interaction.channel.id}.txt"
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(transcript_content)
-
-                    await log_chan.send(
-                        f"📁 **Transcript for closed ticket:** `#{interaction.channel.name}`",
-                        file=discord.File(file_path)
-                    )
-                    os.remove(file_path)
-                except Exception as e:
-                    print(f"Failed to generate transcript: {e}")
-
-        await asyncio.sleep(5)
-        try:
-            await interaction.channel.delete(reason=f"Ticket closed by {interaction.user}")
         except Exception:
             pass
 
-
 # ==============================================================================
-# GIVEAWAY SYSTEM WITH FIXED / CUSTOM WINNER LOGIC
-# ==============================================================================
-
-@bot.hybrid_command(name="giveaway", description="Start an interactive giveaway with optional fixed winner.")
-@app_commands.describe(
-    prize="The prize being given away",
-    duration="Duration format (e.g. 30s, 10m, 2h, 1d)",
-    winners_count="Number of winners to pick",
-    fixed_winner="Optional specific member to guarantee as a winner"
-)
-@commands.has_permissions(manage_guild=True)
-async def giveaway(
-    ctx: commands.Context, 
-    prize: str, 
-    duration: str, 
-    winners_count: int = 1, 
-    fixed_winner: discord.Member = None
-):
-    channel = ctx.channel
-    author = ctx.author
-    guild = ctx.guild
-
-    seconds = parse_time(duration)
-
-    embed = discord.Embed(
-        title="🎉 GIVEAWAY TIME! 🎉",
-        description=f"**Prize:** {prize}\n**Winner(s):** `{winners_count}`\n**Hosted by:** {author.mention}\n\nReact with 🎉 to enter!",
-        color=discord.Color.gold(),
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed.set_footer(text=f"Ends in {duration}")
-
-    msg = await ctx.send(embed=embed)
-
-    await msg.add_reaction("🎉")
-    await asyncio.sleep(seconds)
-
-    try:
-        msg = await channel.fetch_message(msg.id)
-    except Exception:
-        return
-
-    reaction = discord.utils.get(msg.reactions, emoji="🎉")
-    participants = []
-    if reaction:
-        async for u in reaction.users():
-            if not u.bot:
-                participants.append(u.id)
-
-    chosen_winners = []
-    if fixed_winner and fixed_winner.id in participants:
-        chosen_winners.append(fixed_winner)
-        participants.remove(fixed_winner.id)
-
-    while len(chosen_winners) < winners_count and participants:
-        winner_id = random.choice(participants)
-        participants.remove(winner_id)
-        member = guild.get_member(winner_id)
-        if member:
-            chosen_winners.append(member)
-
-    if chosen_winners:
-        winners_mention = ", ".join([w.mention for w in chosen_winners])
-        ended_embed = discord.Embed(
-            title="🎉 GIVEAWAY ENDED 🎉",
-            description=f"**Prize:** {prize}\n**Winner(s):** {winners_mention} 🏆\n**Hosted by:** {author.mention}",
-            color=discord.Color.green(),
-            timestamp=datetime.now(timezone.utc)
-        )
-        await msg.edit(embed=ended_embed, view=None)
-        await channel.send(f"🎊 Congratulations {winners_mention}! You won **{prize}**!")
-    else:
-        ended_embed = discord.Embed(
-            title="🎉 GIVEAWAY ENDED 🎉",
-            description=f"**Prize:** {prize}\n❌ No valid participants found.",
-            color=discord.Color.red(),
-            timestamp=datetime.now(timezone.utc)
-        )
-        await msg.edit(embed=ended_embed, view=None)
-
-# ==============================================================================
-# CONFIGURATION COMMANDS (ANTI-NUKE, PREFIX, LIMITS)
+# ANTI-NUKE & CONFIGURATION COMMANDS
 # ==============================================================================
 
-@bot.tree.command(name="set_ban_limit", description="Set anti-nuke max ban threshold limit.")
+@bot.tree.command(name="set_ban_limit", description="Set max ban limit threshold for anti-nuke.")
 @bot.command(name="set_ban_limit")
 @app_commands.checks.has_permissions(administrator=True)
 async def set_ban_limit(ctx_or_interaction, limit: int):
@@ -466,14 +88,14 @@ async def set_ban_limit(ctx_or_interaction, limit: int):
         else: await ctx_or_interaction.send(msg)
         return
 
-    global ban_limit
-    ban_limit = limit
-    res = f"✅ **Anti-Nuke Ban Limit updated to:** `{ban_limit}` bans / 2 mins"
+    global ban_limit_threshold
+    ban_limit_threshold = limit
+    res = f"✅ **Anti-Nuke Ban Limit updated to:** `{limit}`"
     if is_interaction: await ctx_or_interaction.response.send_message(res)
     else: await ctx_or_interaction.send(res)
 
 
-@bot.tree.command(name="set_channel_limit", description="Set anti-nuke max channel delete threshold limit.")
+@bot.tree.command(name="set_channel_limit", description="Set max channel deletion limit.")
 @bot.command(name="set_channel_limit")
 @app_commands.checks.has_permissions(administrator=True)
 async def set_channel_limit(ctx_or_interaction, limit: int):
@@ -487,17 +109,17 @@ async def set_channel_limit(ctx_or_interaction, limit: int):
         else: await ctx_or_interaction.send(msg)
         return
 
-    global channel_limit
-    channel_limit = limit
-    res = f"✅ **Anti-Nuke Channel Delete Limit updated to:** `{channel_limit}` channels / 2 mins"
+    global channel_limit_threshold
+    channel_limit_threshold = limit
+    res = f"✅ **Anti-Nuke Channel Limit updated to:** `{limit}`"
     if is_interaction: await ctx_or_interaction.response.send_message(res)
     else: await ctx_or_interaction.send(res)
 
 
-@bot.tree.command(name="set_spam_limit", description="Set max allowed messages within 5 seconds before mute.")
+@bot.tree.command(name="set_spam_limit", description="Set message spam speed threshold.")
 @bot.command(name="set_spam_limit")
 @app_commands.checks.has_permissions(administrator=True)
-async def set_spam_limit(ctx_or_interaction, messages_count: int):
+async def set_spam_limit(ctx_or_interaction, limit: int):
     is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
     user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
     guild = ctx_or_interaction.guild
@@ -508,17 +130,17 @@ async def set_spam_limit(ctx_or_interaction, messages_count: int):
         else: await ctx_or_interaction.send(msg)
         return
 
-    global spam_limit
-    spam_limit = messages_count
-    res = f"✅ **Anti-Spam Limit updated to:** `{spam_limit}` msgs / 5 sec"
+    global spam_limit_threshold
+    spam_limit_threshold = limit
+    res = f"✅ **Anti-Spam Limit updated to:** `{limit}` messages"
     if is_interaction: await ctx_or_interaction.response.send_message(res)
     else: await ctx_or_interaction.send(res)
 
 
-@bot.tree.command(name="set_prefix", description="Set custom prefix for text commands.")
+@bot.tree.command(name="set_prefix", description="Change text command prefix.")
 @bot.command(name="set_prefix")
 @app_commands.checks.has_permissions(administrator=True)
-async def set_prefix(ctx_or_interaction, prefix: str):
+async def set_prefix(ctx_or_interaction, new_prefix: str):
     is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
     user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
     guild = ctx_or_interaction.guild
@@ -529,15 +151,77 @@ async def set_prefix(ctx_or_interaction, prefix: str):
         else: await ctx_or_interaction.send(msg)
         return
 
-    global custom_prefix
-    custom_prefix = prefix
-    bot.command_prefix = commands.when_mentioned_or(custom_prefix)
-    res = f"✅ **Custom Prefix updated to:** `{custom_prefix}`"
+    global prefix
+    prefix = new_prefix
+    bot.command_prefix = new_prefix
+    res = f"✅ **Prefix updated successfully to:** `{new_prefix}`"
     if is_interaction: await ctx_or_interaction.response.send_message(res)
     else: await ctx_or_interaction.send(res)
 
 
-@bot.tree.command(name="ticket_log_channel", description="Set log channel for closed ticket transcripts.")
+# ==============================================================================
+# TICKET SYSTEM MODULE (MODALS, VIEWS & COMMANDS)
+# ==============================================================================
+
+class TicketControlView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🔒 Close Ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket_btn")
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("🔒 **Closing ticket and generating transcript...**", ephemeral=True)
+        
+        # Transcript generation logic
+        messages = [f"{msg.author}: {msg.content}" async for msg in interaction.channel.history(limit=200, oldest_first=True)]
+        transcript_content = "\n".join(messages)
+        file = discord.File(io.BytesIO(transcript_content.encode('utf-8')), filename=f"transcript-{interaction.channel.name}.txt")
+
+        if ticket_log_channel_id:
+            log_channel = interaction.guild.get_channel(ticket_log_channel_id)
+            if log_channel:
+                await log_channel.send(f"📁 **Transcript for closed ticket:** `{interaction.channel.name}`", file=file)
+
+        await asyncio.sleep(3)
+        await interaction.channel.delete()
+
+
+class TicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.select(
+        placeholder="Select ticket category...",
+        custom_id="ticket_dropdown_select",
+        options=[
+            discord.SelectOption(label="Support / General", description="Open general support ticket", emoji="🎫"),
+            discord.SelectOption(label="Purchase / Store", description="Inquire about store ranks or items", emoji="🛒"),
+            discord.SelectOption(label="Report Player", description="Report a rule breaker", emoji="⚠️")
+        ]
+    )
+    async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
+        guild = interaction.guild
+        category_name = select.values[0]
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True, read_message_history=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+        }
+        
+        ticket_channel = await guild.create_text_channel(
+            name=f"ticket-{interaction.user.name}",
+            overwrites=overwrites
+        )
+
+        embed = discord.Embed(
+            title=f"Ticket: {category_name}",
+            description=f"Welcome {interaction.user.mention}!\n{custom_ticket_ping}",
+            color=discord.Color.blue()
+        )
+        await ticket_channel.send(content=interaction.user.mention, embed=embed, view=TicketControlView())
+        await interaction.response.send_message(f"✅ Your ticket has been created: {ticket_channel.mention}", ephemeral=True)
+
+
+@bot.tree.command(name="ticket_log_channel", description="Set channel for saving ticket transcripts.")
 @bot.command(name="ticket_log_channel")
 @app_commands.checks.has_permissions(administrator=True)
 async def ticket_log_channel(ctx_or_interaction, channel: discord.TextChannel):
@@ -594,7 +278,7 @@ async def setup_ticket(ctx_or_interaction):
         return
 
     embed = discord.Embed(
-        title="support Ticket Panel",
+        title="Support Ticket Panel",
         description="Select an option from the dropdown menu below to open a ticket.",
         color=discord.Color.blue()
     )
@@ -603,6 +287,83 @@ async def setup_ticket(ctx_or_interaction):
         await ctx_or_interaction.response.send_message(embed=embed, view=view)
     else:
         await ctx_or_interaction.send(embed=embed, view=view)
+
+
+# ==============================================================================
+# GIVEAWAY SYSTEM MODULE
+# ==============================================================================
+
+class GiveawayView(discord.ui.View):
+    def __init__(self, fixed_winner: discord.Member = None):
+        super().__init__(timeout=None)
+        self.participants = set()
+        self.fixed_winner = fixed_winner
+
+    @discord.ui.button(label="🎉 Enter Giveaway", style=discord.ButtonStyle.green, custom_id="enter_giveaway_btn")
+    async def enter_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id in self.participants:
+            await interaction.response.send_message("❌ You have already entered this giveaway!", ephemeral=True)
+        else:
+            self.participants.add(interaction.user.id)
+            await interaction.response.send_message("✅ Entry recorded successfully!", ephemeral=True)
+
+
+@bot.tree.command(name="giveaway", description="Start an interactive giveaway.")
+@bot.command(name="giveaway")
+@app_commands.checks.has_permissions(administrator=True)
+async def giveaway(ctx_or_interaction, prize: str, duration: str, winners: int = 1, fixed_winner: discord.Member = None):
+    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
+    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
+    guild = ctx_or_interaction.guild
+
+    if not is_whitelisted(user, guild):
+        msg = "❌ **Access Denied:** You need administrator permissions."
+        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
+        else: await ctx_or_interaction.send(msg)
+        return
+
+    seconds = parse_time(duration)
+    embed = discord.Embed(
+        title="🎉 GIVEAWAY 🎉",
+        description=f"**Prize:** {prize}\n**Winners:** {winners}\n**Duration:** {duration}\n\nClick the button below to join!",
+        color=discord.Color.gold()
+    )
+    view = GiveawayView(fixed_winner=fixed_winner)
+
+    if is_interaction:
+        await ctx_or_interaction.response.send_message(embed=embed, view=view)
+        msg = await ctx_or_interaction.original_response()
+    else:
+        msg = await ctx_or_interaction.send(embed=embed, view=view)
+
+    await asyncio.sleep(seconds)
+
+    # Pick winner logic
+    import random
+    participant_list = list(view.participants)
+    chosen_winners = []
+
+    if fixed_winner and fixed_winner.id in view.participants:
+        chosen_winners.append(fixed_winner)
+        winners -= 1
+
+    if participant_list and winners > 0:
+        remaining_count = min(winners, len(participant_list))
+        random_ids = random.sample(participant_list, remaining_count)
+        for uid in random_ids:
+            m = guild.get_member(uid)
+            if m and m not in chosen_winners:
+                chosen_winners.append(m)
+
+    winner_str = ", ".join([w.mention for w in chosen_winners]) if chosen_winners else "No valid entries"
+    end_embed = discord.Embed(
+        title="🎉 GIVEAWAY ENDED 🎉",
+        description=f"**Prize:** {prize}\n**Winner(s):** {winner_str}",
+        color=discord.Color.dark_gold()
+    )
+    await msg.edit(embed=end_embed, view=None)
+    if chosen_winners:
+        await msg.channel.send(f"Congratulations {winner_str}! You won **{prize}**!")
 
 
 # ==============================================================================
@@ -1040,13 +801,12 @@ async def help_mod(ctx_or_interaction):
 
 
 # ==============================================================================
-# KEEP ALIVE & BOT START EXECUTION
+# BOT START EXECUTION
 # ==============================================================================
-
-keep_alive()
 
 BOT_TOKEN = os.getenv("DISCORD_TOKEN")
 if BOT_TOKEN:
     bot.run(BOT_TOKEN)
 else:
     print("❌ Error: DISCORD_TOKEN environment variable not found!")
+ 
