@@ -472,26 +472,12 @@ async def set_channel_limit(ctx: commands.Context, limit: int):
     await ctx.send(f"✅ **Anti-Nuke Channel Delete Limit updated to:** `{channel_limit}` channels / 2 mins")
 
 
-@bot.tree.command(name="set_spam_limit", description="Set max allowed messages within 5 seconds before mute.")
-@bot.command(name="set_spam_limit")
+@bot.hybrid_command(name="set_spam_limit", description="Set max allowed messages within 5 seconds before mute.")
 @app_commands.checks.has_permissions(administrator=True)
-async def set_spam_limit(ctx_or_interaction, messages_count: int):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild):
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-
+async def set_spam_limit(ctx: commands.Context, messages_count: int):
     global spam_limit
     spam_limit = messages_count
-    res = f"✅ **Anti-Spam Limit updated to:** `{spam_limit}` msgs / 5 sec"
-    if is_interaction: await ctx_or_interaction.response.send_message(res)
-    else: await ctx_or_interaction.send(res)
-
+    await ctx.send(f"✅ **Anti-Spam Limit updated to:** `{spam_limit}` msgs / 5 sec")
 
 @bot.tree.command(name="set_prefix", description="Set custom prefix for text commands.")
 @bot.command(name="set_prefix")
