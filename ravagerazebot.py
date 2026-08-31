@@ -224,11 +224,7 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
         print(f"Error in on_guild_channel_delete anti-nuke: {e}")
 
 
-# ==========================================================
-# ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (100% WORKING FIX)
-# ==========================================================
-
-
+#ticket system advanced
 ticket_configs = {}
 ticket_log_channel_id = None
 custom_ticket_ping = "{role} New ticket opened by {user}"
