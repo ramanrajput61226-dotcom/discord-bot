@@ -29,7 +29,7 @@ custom_welcome_img = None
 welcome_enabled = False
 invites_cache = {}
 
-# Dynamic Ticket Options & Questions storage for editable features
+# Dynamic Ticket Options & Questions storage for editable features (Emojis Removed)
 ticket_options = [
     {"label": "Support", "description": "Open a general support ticket", "questions": ["What is your issue?"]},
     {"label": "Report", "description": "Report a user or bug", "questions": ["Who/What are you reporting?", "Provide proof/details"]}
@@ -70,7 +70,6 @@ async def on_ready():
             pass
 
 # ==================== HYBRID PREFIX / SLASH SUPPORT WRAPPER ====================
-# Yeh ensure karega ki commands prefix se bhi chal sakein aur slash se bhi.
 
 @bot.event
 async def on_message(message):
@@ -114,7 +113,6 @@ class TicketSetupModal(Modal, title="Edit Ticket Options & Questions"):
         global ticket_options
         questions_list = [q.strip() for q in self.option_questions.value.split(",") if q.strip()]
         
-        # Update or add option (Editable without restart)
         found = False
         for opt in ticket_options:
             if opt["label"].lower() == self.option_label.value.strip().lower():
@@ -139,7 +137,7 @@ class TicketDropdown(discord.ui.Select):
     def __init__(self):
         options = []
         for opt in ticket_options:
-            # NO DEFAULT EMOJIS HERE AS REQUESTED
+            # NO EMOJIS INCLUDED HERE
             options.append(discord.SelectOption(label=opt["label"], description=opt["description"]))
         super().__init__(placeholder="Select a ticket type to open...", min_values=1, max_values=1, options=options)
 
@@ -147,7 +145,6 @@ class TicketDropdown(discord.ui.Select):
         selected_option = self.values[0]
         opt_data = next((opt for opt in ticket_options if opt["label"] == selected_option), None)
         
-        # Open ticket channel logic placeholder
         overwrites = {
             interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
@@ -184,7 +181,6 @@ class TicketView(discord.ui.View):
 @bot.command(name="setup_ticket")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_setup_ticket(interaction_or_ctx, role: discord.Role = None, category: discord.CategoryChannel = None):
-    # Support both ctx (prefix) and interaction (slash)
     is_interaction = isinstance(interaction_or_ctx, discord.Interaction)
     author = interaction_or_ctx.user if is_interaction else interaction_or_ctx.author
     guild = interaction_or_ctx.guild
@@ -198,7 +194,7 @@ async def slash_setup_ticket(interaction_or_ctx, role: discord.Role = None, cate
         return
 
     embed = discord.Embed(
-        title="🎫 Support Ticket Panel",
+        title="Support Ticket Panel",
         description="Select an option from the dropdown menu below to open a ticket.",
         color=discord.Color.blue()
     )
@@ -217,7 +213,6 @@ async def slash_edit_ticket_options(interaction_or_ctx):
     if is_interaction:
         await interaction_or_ctx.response.send_modal(TicketSetupModal())
     else:
-        # For prefix command simulation with modal, send instruction or context notice
         await interaction_or_ctx.send("⚠️ Please use the slash command `/edit_ticket_options` to open the interactive edit modal.")
 
 
@@ -234,7 +229,7 @@ async def slash_giveaway(interaction_or_ctx, prize: str, duration: str, winners_
     seconds = parse_time(duration)
     
     embed = discord.Embed(
-        title="🎉 GIVEAWAY 🎉",
+        title="GIVEAWAY",
         description=f"**Prize:** {prize}\n**Winner(s):** `{winners_count}`\n**Hosted by:** {user.mention}\n\nReact with 🎉 to enter!",
         color=discord.Color.gold()
     )
@@ -278,15 +273,15 @@ async def slash_giveaway(interaction_or_ctx, prize: str, duration: str, winners_
     if chosen_winners:
         winners_mention = ", ".join([w.mention for w in chosen_winners])
         result_embed = discord.Embed(
-            title="🎉 GIVEAWAY ENDED 🎉",
+            title="GIVEAWAY ENDED",
             description=f"**Prize:** {prize}\n**Winner(s):** {winners_mention} 🏆",
             color=discord.Color.green()
         )
         await msg.edit(embed=result_embed, view=None)
-        await channel.send(f"🎊 Congratulations {winners_mention}! You won **{prize}**!")
+        await channel.send(f"Congratulations {winners_mention}! You won **{prize}**!")
     else:
         result_embed = discord.Embed(
-            title="🎉 GIVEAWAY ENDED 🎉",
+            title="GIVEAWAY ENDED",
             description=f"**Prize:** {prize}\n❌ No valid participants found.",
             color=discord.Color.red()
         )
@@ -447,94 +442,6 @@ async def slash_set_ticket_ping(interaction_or_ctx, message: str):
     else: await interaction_or_ctx.send(res)
 
 
-# ==================== HELP COMMANDS ====================
-
-@bot.tree.command(name="antinuke_help", description="Show all Anti-Nuke and Anti-Spam configuration commands.")
-@bot.command(name="antinuke_help")
-async def help_antinuke(interaction_or_ctx):
-    embed = discord.Embed(title="🛡️ Anti-Nuke & Anti-Spam Commands", color=discord.Color.red())
-    embed.add_field(name="/set_ban_limit <limit>", value="Set max ban limit threshold", inline=False)
-    embed.add_field(name="/set_channel_limit <limit>", value="Set max channel deletion limit", inline=False)
-    embed.add_field(name="/set_spam_limit <msgs>", value="Set message spam speed threshold", inline=False)
-    
-    if isinstance(interaction_or_ctx, discord.Interaction):
-        await interaction_or_ctx.response.send_message(embed=embed)
-    else:
-        await interaction_or_ctx.send(embed=embed)
-
-
-@bot.tree.command(name="ticket_help", description="Show all Ticket Panel management commands.")
-@bot.command(name="ticket_help")
-async def help_ticket(interaction_or_ctx):
-    embed = discord.Embed(title="🎫 Ticket System Commands", color=discord.Color.blue())
-    embed.add_field(name="/setup_ticket", value="Launch interactive setup wizard for clean ticket panel UI", inline=False)
-    embed.add_field(name="/edit_ticket_options", value="Directly edit ticket options and questions dynamically", inline=False)
-    embed.add_field(name="/ticket_log_channel <channel>", value="Set channel for closed ticket text transcripts", inline=False)
-    embed.add_field(name="/set_ticket_ping <msg>", value="Set custom ticket mention message", inline=False)
-    
-    if isinstance(interaction_or_ctx, discord.Interaction):
-        await interaction_or_ctx.response.send_message(embed=embed)
-    else:
-        await interaction_or_ctx.send(embed=embed)
-
-
-@bot.tree.command(name="giveaway_help", description="Show all Giveaway system commands.")
-@bot.command(name="giveaway_help")
-async def help_giveaway(interaction_or_ctx):
-    embed = discord.Embed(title="🎉 Giveaway System Commands", color=discord.Color.gold())
-    embed.add_field(name="/giveaway <prize> <duration> [winners] [fixed_winner]", value="Start giveaway with optional fixed/custom winner", inline=False)
-    
-    if isinstance(interaction_or_ctx, discord.Interaction):
-        await interaction_or_ctx.response.send_message(embed=embed)
-    else:
-        await interaction_or_ctx.send(embed=embed)
-
-
-@bot.tree.command(name="welcome_help", description="Show all Welcome System commands.")
-@bot.command(name="welcome_help")
-async def help_welcome(interaction_or_ctx):
-    embed = discord.Embed(title="👋 Welcome System Commands", color=discord.Color.green())
-    embed.add_field(name="/setup_welcome", value="Set welcome channel, message, and banner image via modal wizard", inline=False)
-    embed.add_field(name="/disable_welcome", value="Turn off welcome system", inline=False)
-    
-    if isinstance(interaction_or_ctx, discord.Interaction):
-        await interaction_or_ctx.response.send_message(embed=embed)
-    else:
-        await interaction_or_ctx.send(embed=embed)
-
-
-@bot.tree.command(name="invites_help", description="Show all Invite Tracker commands.")
-@bot.command(name="invites_help")
-async def help_invites(interaction_or_ctx):
-    embed = discord.Embed(title="📊 Invite Tracker Commands", color=discord.Color.gold())
-    embed.add_field(name="/setup_invitelog [channel]", value="Set invite logging channel", inline=False)
-    embed.add_field(name="/invites [member]", value="Check member invite count", inline=False)
-    
-    if isinstance(interaction_or_ctx, discord.Interaction):
-        await interaction_or_ctx.response.send_message(embed=embed)
-    else:
-        await interaction_or_ctx.send(embed=embed)
-
-
-@bot.tree.command(name="moderation_help", description="Show all Moderation commands.")
-@bot.command(name="moderation_help")
-async def help_mod(interaction_or_ctx):
-    embed = discord.Embed(title="🔨 Moderation Commands", color=discord.Color.purple())
-    embed.add_field(name="/ban <member> [reason]", value="Permanently ban a member", inline=False)
-    embed.add_field(name="/mute <member> <time> [reason]", value="Timeout member (e.g. 10m, 1h)", inline=False)
-    embed.add_field(name="/purge <amount>", value="Clear up to 100 messages in channel", inline=False)
-    embed.add_field(name="/role <add/remove> <member> <role>", value="Quickly assign or remove roles", inline=False)
-    embed.add_field(name="/set_prefix <prefix>", value="Change bot command prefix", inline=False)
-    embed.add_field(name="/dmall <message>", value="Broadcast announcement via DMs", inline=False)
-    
-    if isinstance(interaction_or_ctx, discord.Interaction):
-        await interaction_or_ctx.response.send_message(embed=embed)
-    else:
-        await interaction_or_ctx.send(embed=embed)
-
-
-# ==================== INVITE & MODERATION COMMANDS ====================
-
 @bot.tree.command(name="setup_invitelog", description="Set channel for invite logs.")
 @bot.command(name="setup_invitelog")
 @app_commands.checks.has_permissions(administrator=True)
@@ -574,7 +481,7 @@ async def slash_invites(interaction_or_ctx, member: discord.Member = None):
         pass
 
     embed = discord.Embed(
-        title=f"📊 Invite Stats: {target.display_name}",
+        title=f"Invite Stats: {target.display_name}",
         description=f"👤 **Member:** {target.mention}\n📈 **Total Invites:** `{total_uses}`",
         color=discord.Color.blue()
     )
@@ -611,7 +518,7 @@ async def slash_dmall(interaction_or_ctx, message: str, as_embed: bool = False):
         if member.bot: continue
         try:
             if as_embed:
-                embed = discord.Embed(title=f"📢 Announcement from {guild.name}", description=message, color=discord.Color.gold())
+                embed = discord.Embed(title=f"Announcement from {guild.name}", description=message, color=discord.Color.gold())
                 await member.send(embed=embed)
             else:
                 await member.send(content=message)
@@ -659,7 +566,7 @@ class WelcomeSelectView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
 
-    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="📌 Select Welcome Channel...", channel_types=[discord.ChannelType.text], min_values=1, max_values=1)
+    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="Select Welcome Channel...", channel_types=[discord.ChannelType.text], min_values=1, max_values=1)
     async def select_channel(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
         selected_channel = select.values[0]
         global welcome_channel_id
@@ -841,12 +748,98 @@ async def on_member_join(member):
         else:
             description_text = f"Hey {member.mention}, welcome to **{guild.name}**!"
 
-        embed = discord.Embed(title="👋 Welcome!", description=description_text, color=discord.Color.blue())
+        embed = discord.Embed(title="Welcome!", description=description_text, color=discord.Color.blue())
         embed.set_thumbnail(url=member.display_avatar.url)
         if custom_welcome_img:
             embed.set_image(url=custom_welcome_img)
         embed.set_footer(text=f"Member #{guild.member_count}")
         await target_channel.send(content=f"Welcome {member.mention}!", embed=embed)
+
+
+# ==================== HELP COMMANDS ====================
+
+@bot.tree.command(name="antinuke_help", description="Show all Anti-Nuke and Anti-Spam configuration commands.")
+@bot.command(name="antinuke_help")
+async def help_antinuke(interaction_or_ctx):
+    embed = discord.Embed(title="🛡️ Anti-Nuke & Anti-Spam Commands", color=discord.Color.red())
+    embed.add_field(name="/set_ban_limit <limit>", value="Set max ban limit threshold", inline=False)
+    embed.add_field(name="/set_channel_limit <limit>", value="Set max channel deletion limit", inline=False)
+    embed.add_field(name="/set_spam_limit <msgs>", value="Set message spam speed threshold", inline=False)
+    
+    if isinstance(interaction_or_ctx, discord.Interaction):
+        await interaction_or_ctx.response.send_message(embed=embed)
+    else:
+        await interaction_or_ctx.send(embed=embed)
+
+
+@bot.tree.command(name="ticket_help", description="Show all Ticket Panel management commands.")
+@bot.command(name="ticket_help")
+async def help_ticket(interaction_or_ctx):
+    embed = discord.Embed(title="🎫 Ticket System Commands", color=discord.Color.blue())
+    embed.add_field(name="/setup_ticket", value="Launch interactive setup wizard for clean ticket panel UI", inline=False)
+    embed.add_field(name="/edit_ticket_options", value="Directly edit ticket options and questions dynamically", inline=False)
+    embed.add_field(name="/ticket_log_channel <channel>", value="Set channel for closed ticket text transcripts", inline=False)
+    embed.add_field(name="/set_ticket_ping <msg>", value="Set custom ticket mention message", inline=False)
+    
+    if isinstance(interaction_or_ctx, discord.Interaction):
+        await interaction_or_ctx.response.send_message(embed=embed)
+    else:
+        await interaction_or_ctx.send(embed=embed)
+
+
+@bot.tree.command(name="giveaway_help", description="Show all Giveaway system commands.")
+@bot.command(name="giveaway_help")
+async def help_giveaway(interaction_or_ctx):
+    embed = discord.Embed(title="🎉 Giveaway System Commands", color=discord.Color.gold())
+    embed.add_field(name="/giveaway <prize> <duration> [winners] [fixed_winner]", value="Start giveaway with optional fixed/custom winner", inline=False)
+    
+    if isinstance(interaction_or_ctx, discord.Interaction):
+        await interaction_or_ctx.response.send_message(embed=embed)
+    else:
+        await interaction_or_ctx.send(embed=embed)
+
+
+@bot.tree.command(name="welcome_help", description="Show all Welcome System commands.")
+@bot.command(name="welcome_help")
+async def help_welcome(interaction_or_ctx):
+    embed = discord.Embed(title="👋 Welcome System Commands", color=discord.Color.green())
+    embed.add_field(name="/setup_welcome", value="Set welcome channel, message, and banner image via modal wizard", inline=False)
+    embed.add_field(name="/disable_welcome", value="Turn off welcome system", inline=False)
+    
+    if isinstance(interaction_or_ctx, discord.Interaction):
+        await interaction_or_ctx.response.send_message(embed=embed)
+    else:
+        await interaction_or_ctx.send(embed=embed)
+
+
+@bot.tree.command(name="invites_help", description="Show all Invite Tracker commands.")
+@bot.command(name="invites_help")
+async def help_invites(interaction_or_ctx):
+    embed = discord.Embed(title="📊 Invite Tracker Commands", color=discord.Color.gold())
+    embed.add_field(name="/setup_invitelog [channel]", value="Set invite logging channel", inline=False)
+    embed.add_field(name="/invites [member]", value="Check member invite count", inline=False)
+    
+    if isinstance(interaction_or_ctx, discord.Interaction):
+        await interaction_or_ctx.response.send_message(embed=embed)
+    else:
+        await interaction_or_ctx.send(embed=embed)
+
+
+@bot.tree.command(name="moderation_help", description="Show all Moderation commands.")
+@bot.command(name="moderation_help")
+async def help_mod(interaction_or_ctx):
+    embed = discord.Embed(title="🔨 Moderation Commands", color=discord.Color.purple())
+    embed.add_field(name="/ban <member> [reason]", value="Permanently ban a member", inline=False)
+    embed.add_field(name="/mute <member> <time> [reason]", value="Timeout member (e.g. 10m, 1h)", inline=False)
+    embed.add_field(name="/purge <amount>", value="Clear up to 100 messages in channel", inline=False)
+    embed.add_field(name="/role <add/remove> <member> <role>", value="Quickly assign or remove roles", inline=False)
+    embed.add_field(name="/set_prefix <prefix>", value="Change bot command prefix", inline=False)
+    embed.add_field(name="/dmall <message>", value="Broadcast announcement via DMs", inline=False)
+    
+    if isinstance(interaction_or_ctx, discord.Interaction):
+        await interaction_or_ctx.response.send_message(embed=embed)
+    else:
+        await interaction_or_ctx.send(embed=embed)
 
 
 # ==================== RUN BOT ====================
@@ -857,4 +850,3 @@ if BOT_TOKEN:
     bot.run(BOT_TOKEN)
 else:
     print("❌ Error: DISCORD_TOKEN environment variable not found!")
- 
