@@ -21,7 +21,7 @@ except ImportError:
 # GLOBAL STATES & CONFIGURATIONS
 # ==============================================================================
 
-OWNER_ID = None  # Safely initialized to prevent NameError
+OWNER_ID = 1255544682759323680  # Safely initialized to prevent NameError
 ban_limit = 5
 channel_limit = 3
 spam_limit = 5
@@ -456,18 +456,12 @@ async def giveaway(
 
 @bot.hybrid_command(name="set_ban_limit", description="Set anti-nuke max ban threshold limit.")
 @app_commands.checks.has_permissions(administrator=True)
-async def set_ban_limit(ctx, limit: int):
-    is_interaction = isinstance(ctx, discord.Interaction)
-    user = ctx.user if is_interaction else ctx.author
-    guild = ctx.guild
-
-    if not is_whitelisted(user, guild):
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction:
-            await ctx.response.send_message(msg, ephemeral=True)
-        else:
-            await ctx.send(msg)
-        return
+async def set_ban_limit(ctx: commands.Context, limit: int):
+    global ban_limit
+    ban_limit = limit
+    
+    res = f"✅ **Anti-Nuke Ban Limit updated to:** `{ban_limit}` bans / 2 mins"
+    await ctx.send(res)
 
     global ban_limit
     ban_limit = limit
