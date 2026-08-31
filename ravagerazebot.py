@@ -454,10 +454,28 @@ async def giveaway(
 # CONFIGURATION COMMANDS (ANTI-NUKE, PREFIX, LIMITS)
 # ==============================================================================
 
-@bot.tree.command(name="set_ban_limit", description="Set anti-nuke max ban threshold limit.")
-@bot.command(name="set_ban_limit")
+@bot.hybrid_command(name="set_ban_limit", description="Set anti-nuke max ban threshold limit.")
 @app_commands.checks.has_permissions(administrator=True)
-async def set_ban_limit(ctx_or_interaction, limit: int):
+async def set_ban_limit(ctx, limit: int):
+    is_interaction = isinstance(ctx, discord.Interaction)
+    user = ctx.user if is_interaction else ctx.author
+    guild = ctx.guild
+
+    if not is_whitelisted(user, guild):
+        msg = "❌ **Access Denied:** You need administrator permissions."
+        if is_interaction:
+            await ctx.response.send_message(msg, ephemeral=True)
+        else:
+            await ctx.send(msg)
+        return
+
+    global ban_limit
+    ban_limit = limit
+    res = f"✅ **Anti-Nuke Ban Limit updated to:** `{ban_limit}` bans / 2 mins"
+    if is_interaction:
+        await ctx.response.send_message(res)
+    else:
+        await ctx.send(res)
     is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
     user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
     guild = ctx_or_interaction.guild
