@@ -479,94 +479,42 @@ async def set_spam_limit(ctx: commands.Context, messages_count: int):
     spam_limit = messages_count
     await ctx.send(f"✅ **Anti-Spam Limit updated to:** `{spam_limit}` msgs / 5 sec")
 
-@bot.tree.command(name="set_prefix", description="Set custom prefix for text commands.")
-@bot.command(name="set_prefix")
+
+@bot.hybrid_command(name="set_prefix", description="Set custom prefix for text commands.")
 @app_commands.checks.has_permissions(administrator=True)
-async def set_prefix(ctx_or_interaction, prefix: str):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild):
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-
+async def set_prefix(ctx: commands.Context, prefix: str):
     global custom_prefix
     custom_prefix = prefix
     bot.command_prefix = commands.when_mentioned_or(custom_prefix)
-    res = f"✅ **Custom Prefix updated to:** `{custom_prefix}`"
-    if is_interaction: await ctx_or_interaction.response.send_message(res)
-    else: await ctx_or_interaction.send(res)
+    await ctx.send(f"✅ **Custom Prefix updated to:** `{custom_prefix}`")
 
 
-@bot.tree.command(name="ticket_log_channel", description="Set log channel for closed ticket transcripts.")
-@bot.command(name="ticket_log_channel")
+@bot.hybrid_command(name="ticket_log_channel", description="Set log channel for closed ticket transcripts.")
 @app_commands.checks.has_permissions(administrator=True)
-async def ticket_log_channel(ctx_or_interaction, channel: discord.TextChannel):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild):
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-
+async def ticket_log_channel(ctx: commands.Context, channel: discord.TextChannel):
     global ticket_log_channel_id
     ticket_log_channel_id = channel.id
-    res = f"✅ **Ticket Transcript Log Channel set to:** {channel.mention}"
-    if is_interaction: await ctx_or_interaction.response.send_message(res)
-    else: await ctx_or_interaction.send(res)
+    await ctx.send(f"✅ **Ticket Transcript Log Channel set to:** {channel.mention}")
 
 
-@bot.tree.command(name="set_ticket_ping", description="Customize ticket opening ping message.")
-@bot.command(name="set_ticket_ping")
+@bot.hybrid_command(name="set_ticket_ping", description="Customize ticket opening ping message.")
 @app_commands.checks.has_permissions(administrator=True)
-async def set_ticket_ping(ctx_or_interaction, message: str):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild):
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-
+async def set_ticket_ping(ctx: commands.Context, message: str):
     global custom_ticket_ping
     custom_ticket_ping = message
-    res = f"✅ **Ticket Open Ping updated!**\nFormat: `{message}`"
-    if is_interaction: await ctx_or_interaction.response.send_message(res)
-    else: await ctx_or_interaction.send(res)
+    await ctx.send(f"✅ **Ticket Open Ping updated!**\nFormat: `{message}`")
 
 
-@bot.tree.command(name="setup_ticket", description="Send ticket panel interface with dropdown menu.")
-@bot.command(name="setup_ticket")
+@bot.hybrid_command(name="setup_ticket", description="Send ticket panel interface with dropdown menu.")
 @app_commands.checks.has_permissions(administrator=True)
-async def setup_ticket(ctx_or_interaction):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild):
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-
+async def setup_ticket(ctx: commands.Context):
     embed = discord.Embed(
         title="Support Ticket Panel",
         description="Select an option from the dropdown menu below to open a ticket.",
         color=discord.Color.blue()
     )
     view = TicketView()
-    if is_interaction:
-        await ctx_or_interaction.response.send_message(embed=embed, view=view)
-    else:
-        await ctx_or_interaction.send(embed=embed, view=view)
+    await ctx.send(embed=embed, view=view)
 
 
 # ==============================================================================
@@ -611,77 +559,35 @@ class WelcomeSelectView(discord.ui.View):
         await interaction.response.send_modal(SimpleWelcomeModal())
 
 
-@bot.tree.command(name="setup_welcome", description="Configure custom welcome channel, message and banner.")
-@bot.command(name="setup_welcome")
+@bot.hybrid_command(name="setup_welcome", description="Configure custom welcome channel, message and banner.")
 @app_commands.checks.has_permissions(administrator=True)
-async def setup_welcome(ctx_or_interaction):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild):
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-
+async def setup_welcome(ctx: commands.Context):
     view = WelcomeSelectView()
     msg = "📌 **Please select your welcome channel from the dropdown below:**"
-    if is_interaction:
-        await ctx_or_interaction.response.send_message(msg, view=view, ephemeral=True)
-    else:
-        await ctx_or_interaction.send(msg, view=view)
+    await ctx.send(msg, view=view, ephemeral=True)
 
 
-@bot.tree.command(name="disable_welcome", description="Turn off welcome system.")
-@bot.command(name="disable_welcome")
+@bot.hybrid_command(name="disable_welcome", description="Turn off welcome system.")
 @app_commands.checks.has_permissions(administrator=True)
-async def disable_welcome(ctx_or_interaction):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild):
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-
+async def disable_welcome(ctx: commands.Context):
     global welcome_enabled
     welcome_enabled = False
-    res = "❌ **Welcome system has been disabled.**"
-    if is_interaction: await ctx_or_interaction.response.send_message(res)
-    else: await ctx_or_interaction.send(res)
+    await ctx.send("❌ **Welcome system has been disabled.**")
 
 
-@bot.tree.command(name="setup_invitelog", description="Set channel for invite logs.")
-@bot.command(name="setup_invitelog")
+@bot.hybrid_command(name="setup_invitelog", description="Set channel for invite logs.")
 @app_commands.checks.has_permissions(administrator=True)
-async def setup_invitelog(ctx_or_interaction, channel: discord.TextChannel = None):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild):
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-
+async def setup_invitelog(ctx: commands.Context, channel: discord.TextChannel = None):
     global invite_log_channel_id
-    target = channel or (ctx_or_interaction.channel if is_interaction else ctx_or_interaction.message.channel)
+    target = channel or ctx.channel
     invite_log_channel_id = target.id
-    res = f"✅ **Invite Logger set to:** {target.mention}"
-    if is_interaction: await ctx_or_interaction.response.send_message(res)
-    else: await ctx_or_interaction.send(res)
+    await ctx.send(f"✅ **Invite Logger set to:** {target.mention}")
 
 
-@bot.tree.command(name="invites", description="Check invite stats of a server member.")
-@bot.command(name="invites")
-async def invites(ctx_or_interaction, member: discord.Member = None):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    target = member or (ctx_or_interaction.user if is_interaction else ctx_or_interaction.author)
-    guild = ctx_or_interaction.guild
+@bot.hybrid_command(name="invites", description="Check invite stats of a server member.")
+async def invites(ctx: commands.Context, member: discord.Member = None):
+    target = member or ctx.author
+    guild = ctx.guild
 
     total_uses = 0
     try:
@@ -697,110 +603,63 @@ async def invites(ctx_or_interaction, member: discord.Member = None):
         description=f"👤 **Member:** {target.mention}\n📈 **Total Invites:** `{total_uses}`",
         color=discord.Color.blue()
     )
-    if is_interaction:
-        await ctx_or_interaction.response.send_message(embed=embed)
-    else:
-        await ctx_or_interaction.send(embed=embed)
+    await ctx.send(embed=embed)
 
 
 # ==============================================================================
 # MODERATION TOOLS & BROADCAST COMMANDS
 # ==============================================================================
 
-@bot.tree.command(name="ban", description="Permanently ban a member.")
-@bot.command(name="ban")
+@bot.hybrid_command(name="ban", description="Permanently ban a member.")
+@app_commands.describe(member="The member to ban", reason="Reason for the ban")
 @app_commands.checks.has_permissions(ban_members=True)
-async def ban_cmd(ctx_or_interaction, member: discord.Member, reason: str = "No reason provided"):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild) and not user.guild_permissions.ban_members:
-        msg = "❌ **Access Denied:** You lack ban permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
+async def ban_cmd(ctx: commands.Context, member: discord.Member, reason: str = "No reason provided"):
+    guild = ctx.guild
     if is_whitelisted(member, guild):
-        msg = "❌ **Access Denied:** User is whitelisted."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
+        await ctx.send("❌ **Access Denied:** User is whitelisted.", ephemeral=True)
         return
 
     await member.ban(reason=reason)
-    res = f"🔨 **{member.mention} banned successfully!**"
-    if is_interaction: await ctx_or_interaction.response.send_message(res)
-    else: await ctx_or_interaction.send(res)
+    await ctx.send(f"🔨 **{member.mention} banned successfully!**")
 
 
-@bot.tree.command(name="mute", description="Timeout a member for a specified duration.")
-@bot.command(name="mute")
+@bot.hybrid_command(name="mute", description="Timeout a member for a specified duration.")
+@app_commands.describe(member="The member to mute", duration="Duration (e.g. 10m, 1h)", reason="Reason for timeout")
 @app_commands.checks.has_permissions(moderate_members=True)
-async def mute_cmd(ctx_or_interaction, member: discord.Member, duration: str, reason: str = "No reason provided"):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild) and not user.guild_permissions.moderate_members:
-        msg = "❌ **Access Denied:** You lack timeout permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
+async def mute_cmd(ctx: commands.Context, member: discord.Member, duration: str, reason: str = "No reason provided"):
+    guild = ctx.guild
     if is_whitelisted(member, guild):
-        msg = "❌ **Access Denied:** User is whitelisted."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
+        await ctx.send("❌ **Access Denied:** User is whitelisted.", ephemeral=True)
         return
 
     seconds = parse_time(duration)
     await member.timeout(timedelta(seconds=seconds), reason=reason)
-    res = f"🤐 **{member.mention} timed out for {duration}!**"
-    if is_interaction: await ctx_or_interaction.response.send_message(res)
-    else: await ctx_or_interaction.send(res)
+    await ctx.send(f"🤐 **{member.mention} timed out for {duration}!**")
 
 
-@bot.tree.command(name="purge", description="Bulk delete messages in current channel.")
-@bot.command(name="purge")
+@bot.hybrid_command(name="purge", description="Bulk delete messages in current channel.")
+@app_commands.describe(amount="Number of messages to delete (1-100)")
 @app_commands.checks.has_permissions(manage_messages=True)
-async def purge_cmd(ctx_or_interaction, amount: int):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-    channel = ctx_or_interaction.channel if is_interaction else ctx_or_interaction.message.channel
-
-    if not is_whitelisted(user, guild) and not user.guild_permissions.manage_messages:
-        msg = "❌ **Access Denied:** You lack message management permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
+async def purge_cmd(ctx: commands.Context, amount: int):
+    channel = ctx.channel
     if amount < 1 or amount > 100:
-        msg = "❌ Please specify an amount between 1 and 100."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
+        await ctx.send("❌ Please specify an amount between 1 and 100.", ephemeral=True)
         return
 
-    if is_interaction:
-        await ctx_or_interaction.response.defer(ephemeral=True)
+    if ctx.interaction:
+        await ctx.interaction.response.defer(ephemeral=True)
         deleted = await channel.purge(limit=amount)
-        await ctx_or_interaction.followup.send(f"🧹 Successfully deleted **{len(deleted)}** messages!", ephemeral=True)
+        await ctx.interaction.followup.send(f"🧹 Successfully deleted **{len(deleted)}** messages!", ephemeral=True)
     else:
         deleted = await channel.purge(limit=amount)
-        await ctx_or_interaction.send(f"🧹 Successfully deleted **{len(deleted)}** messages!", delete_after=5)
+        await ctx.send(f"🧹 Successfully deleted **{len(deleted)}** messages!", delete_after=5)
 
 
-@bot.tree.command(name="role", description="Assign or remove a role from a member easily.")
-@bot.command(name="role")
+@bot.hybrid_command(name="role", description="Assign or remove a role from a member easily.")
+@app_commands.describe(action="add or remove", member="Target member", role="Target role")
 @app_commands.checks.has_permissions(manage_roles=True)
-async def role_cmd(ctx_or_interaction, action: Literal["add", "remove"], member: discord.Member, role: discord.Role):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild) and not user.guild_permissions.manage_roles:
-        msg = "❌ **Access Denied:** You lack role management permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-
+async def role_cmd(ctx: commands.Context, action: Literal["add", "remove"], member: discord.Member, role: discord.Role):
+    user = ctx.author
     if action == "add":
         await member.add_roles(role, reason=f"Managed by {user}")
         res = f"✅ Successfully added **{role.name}** to {member.mention}!"
@@ -808,35 +667,21 @@ async def role_cmd(ctx_or_interaction, action: Literal["add", "remove"], member:
         await member.remove_roles(role, reason=f"Managed by {user}")
         res = f"✅ Successfully removed **{role.name}** from {member.mention}!"
 
-    if is_interaction: await ctx_or_interaction.response.send_message(res)
-    else: await ctx_or_interaction.send(res)
+    await ctx.send(res)
 
 
-@bot.tree.command(name="dmall", description="Send DM announcement to all server members.")
+@bot.hybrid_command(name="dmall", description="Send DM announcement to all server members.")
 @app_commands.describe(message="The message you want to broadcast", as_embed="True for Embed format, False for Plain Text")
-@bot.command(name="dmall")
 @app_commands.checks.has_permissions(administrator=True)
-async def dmall(ctx_or_interaction, message: str, as_embed: bool = False):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild):
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-        
+async def dmall(ctx: commands.Context, message: str, as_embed: bool = False):
+    guild = ctx.guild
     format_type = "Embed" if as_embed else "Plain Text"
-    start_msg = f"⏳ **Starting DM Broadcast ({format_type})...** Safe delay active."
-    if is_interaction:
-        await ctx_or_interaction.response.send_message(start_msg)
-    else:
-        await ctx_or_interaction.send(start_msg)
+    await ctx.send(f"⏳ **Starting DM Broadcast ({format_type})...** Safe delay active.")
 
     success_count, failed_count = 0, 0
     for member in guild.members:
-        if member.bot: continue
+        if member.bot:
+            continue
         try:
             if as_embed:
                 embed = discord.Embed(title=f"Announcement from {guild.name}", description=message, color=discord.Color.gold())
@@ -848,11 +693,7 @@ async def dmall(ctx_or_interaction, message: str, as_embed: bool = False):
         except Exception:
             failed_count += 1
 
-    end_msg = f"✅ Sent ({format_type}): {success_count} | ❌ Failed: {failed_count}"
-    if is_interaction:
-        await ctx_or_interaction.followup.send(end_msg)
-    else:
-        await ctx_or_interaction.send(end_msg)
+    await ctx.send(f"✅ Sent ({format_type}): {success_count} | ❌ Failed: {failed_count}")
 
 
 # ==============================================================================
@@ -897,13 +738,12 @@ async def on_member_join(member):
     target_channel = guild.get_channel(welcome_channel_id) if welcome_channel_id else guild.system_channel
 
     if target_channel:
-        inviter_name = inviter_user.name if inviter_user else "Unknown"
         if custom_welcome_msg:
             description_text = custom_welcome_msg.format(
                 user=member.mention,
                 server=guild.name,
                 count=guild.member_count,
-                inviter=inviter_name
+                inviter=inviter_user.name if inviter_user else "Unknown"
             )
         else:
             description_text = f"Hey {member.mention}, welcome to **{guild.name}**!"
@@ -920,75 +760,49 @@ async def on_member_join(member):
 # HELP COMMANDS MODULE
 # ==============================================================================
 
-@bot.tree.command(name="antinuke_help", description="Show all Anti-Nuke configuration commands.")
-@bot.command(name="antinuke_help")
-async def help_antinuke(ctx_or_interaction):
+@bot.hybrid_command(name="antinuke_help", description="Show all Anti-Nuke configuration commands.")
+async def help_antinuke(ctx: commands.Context):
     embed = discord.Embed(title="🛡️ Anti-Nuke & Anti-Spam Commands", color=discord.Color.red())
     embed.add_field(name="/set_ban_limit <limit>", value="Set max ban limit threshold", inline=False)
     embed.add_field(name="/set_channel_limit <limit>", value="Set max channel deletion limit", inline=False)
     embed.add_field(name="/set_spam_limit <msgs>", value="Set message spam speed threshold", inline=False)
-    
-    if isinstance(ctx_or_interaction, discord.Interaction):
-        await ctx_or_interaction.response.send_message(embed=embed)
-    else:
-        await ctx_or_interaction.send(embed=embed)
+    await ctx.send(embed=embed)
 
 
-@bot.tree.command(name="ticket_help", description="Show all Ticket Panel management commands.")
-@bot.command(name="ticket_help")
-async def help_ticket(ctx_or_interaction):
+@bot.hybrid_command(name="ticket_help", description="Show all Ticket Panel management commands.")
+async def help_ticket(ctx: commands.Context):
     embed = discord.Embed(title="🎫 Ticket System Commands", color=discord.Color.blue())
     embed.add_field(name="/setup_ticket", value="Send ticket panel interface with dropdown", inline=False)
     embed.add_field(name="/ticket_log_channel <channel>", value="Set channel for transcripts", inline=False)
     embed.add_field(name="/set_ticket_ping <msg>", value="Set custom mention message", inline=False)
-    
-    if isinstance(ctx_or_interaction, discord.Interaction):
-        await ctx_or_interaction.response.send_message(embed=embed)
-    else:
-        await ctx_or_interaction.send(embed=embed)
+    await ctx.send(embed=embed)
 
 
-@bot.tree.command(name="giveaway_help", description="Show all Giveaway system commands.")
-@bot.command(name="giveaway_help")
-async def help_giveaway(ctx_or_interaction):
+@bot.hybrid_command(name="giveaway_help", description="Show all Giveaway system commands.")
+async def help_giveaway(ctx: commands.Context):
     embed = discord.Embed(title="🎉 Giveaway System Commands", color=discord.Color.gold())
     embed.add_field(name="/giveaway <prize> <duration> [winners] [fixed_winner]", value="Start giveaway with optional fixed winner", inline=False)
-    
-    if isinstance(ctx_or_interaction, discord.Interaction):
-        await ctx_or_interaction.response.send_message(embed=embed)
-    else:
-        await ctx_or_interaction.send(embed=embed)
+    await ctx.send(embed=embed)
 
 
-@bot.tree.command(name="welcome_help", description="Show all Welcome System commands.")
-@bot.command(name="welcome_help")
-async def help_welcome(ctx_or_interaction):
+@bot.hybrid_command(name="welcome_help", description="Show all Welcome System commands.")
+async def help_welcome(ctx: commands.Context):
     embed = discord.Embed(title="👋 Welcome System Commands", color=discord.Color.green())
     embed.add_field(name="/setup_welcome", value="Set welcome channel, message, and banner via interactive modal", inline=False)
     embed.add_field(name="/disable_welcome", value="Turn off welcome system", inline=False)
-    
-    if isinstance(ctx_or_interaction, discord.Interaction):
-        await ctx_or_interaction.response.send_message(embed=embed)
-    else:
-        await ctx_or_interaction.send(embed=embed)
+    await ctx.send(embed=embed)
 
 
-@bot.tree.command(name="invites_help", description="Show all Invite Tracker commands.")
-@bot.command(name="invites_help")
-async def help_invites(ctx_or_interaction):
+@bot.hybrid_command(name="invites_help", description="Show all Invite Tracker commands.")
+async def help_invites(ctx: commands.Context):
     embed = discord.Embed(title="📊 Invite Tracker Commands", color=discord.Color.gold())
     embed.add_field(name="/setup_invitelog [channel]", value="Set invite logging channel", inline=False)
     embed.add_field(name="/invites [member]", value="Check member invite count", inline=False)
-    
-    if isinstance(ctx_or_interaction, discord.Interaction):
-        await ctx_or_interaction.response.send_message(embed=embed)
-    else:
-        await ctx_or_interaction.send(embed=embed)
+    await ctx.send(embed=embed)
 
 
-@bot.tree.command(name="moderation_help", description="Show all Moderation commands.")
-@bot.command(name="moderation_help")
-async def help_mod(ctx_or_interaction):
+@bot.hybrid_command(name="moderation_help", description="Show all Moderation commands.")
+async def help_mod(ctx: commands.Context):
     embed = discord.Embed(title="🔨 Moderation Commands", color=discord.Color.purple())
     embed.add_field(name="/ban <member> [reason]", value="Permanently ban a member", inline=False)
     embed.add_field(name="/mute <member> <time> [reason]", value="Timeout member (e.g. 10m, 1h)", inline=False)
@@ -996,11 +810,7 @@ async def help_mod(ctx_or_interaction):
     embed.add_field(name="/role <add/remove> <member> <role>", value="Manage roles quickly", inline=False)
     embed.add_field(name="/set_prefix <prefix>", value="Change text prefix", inline=False)
     embed.add_field(name="/dmall <message>", value="Broadcast DMs to server members", inline=False)
-    
-    if isinstance(ctx_or_interaction, discord.Interaction):
-        await ctx_or_interaction.response.send_message(embed=embed)
-    else:
-        await ctx_or_interaction.send(embed=embed)
+    await ctx.send(embed=embed)
 
 
 # ==============================================================================
@@ -1014,4 +824,5 @@ if BOT_TOKEN:
     bot.run(BOT_TOKEN)
 else:
     print("❌ Error: DISCORD_TOKEN environment variable not found!")
- 
+
+
