@@ -781,6 +781,20 @@ async def slash_dmall(interaction: discord.Interaction, message: str, as_embed: 
 
 
 
+class WelcomeSelectView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="📌 Select Welcome Channel...", channel_types=[discord.ChannelType.text], min_values=1, max_values=1)
+    async def select_channel(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        selected_channel = select.values[0]
+        global welcome_channel_id
+        welcome_channel_id = selected_channel.id
+        
+        # Channel select hone ke turant baad modal khulega message aur banner ke liye
+        await interaction.response.send_modal(SimpleWelcomeModal())
+
+
 class SimpleWelcomeModal(Modal, title="Configure Welcome Message"):
     wel_msg = TextInput(
         label="Welcome Message", 
@@ -802,30 +816,21 @@ class SimpleWelcomeModal(Modal, title="Configure Welcome Message"):
         welcome_enabled = True
         
         await interaction.response.send_message(
-            f"✅ **Welcome message successfully updated!**\n\n**Message:** `{custom_welcome_msg}`", 
+            f"✅ **Welcome system fully updated!**\n\n💬 **Message:** `{custom_welcome_msg}`", 
             ephemeral=True
         )
 
-@bot.tree.command(name="setup_welcome", description="Configure custom welcome message and banner.")
+
+@bot.tree.command(name="setup_welcome", description="Configure custom welcome channel, message and banner.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_setup_welcome(interaction: discord.Interaction):
     if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
         return
     
-    await interaction.response.send_modal(SimpleWelcomeModal())
-
-
-@bot.tree.command(name="disable_welcome", description="Disable welcome messages.")
-@app_commands.checks.has_permissions(administrator=True)
-async def slash_disable_welcome(interaction: discord.Interaction):
-    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
-        return
-    global welcome_enabled
-    welcome_enabled = False
-    await interaction.response.send_message("🚫 **Welcome messages DISABLED!**")
-
+    # Jaise hi command chalayega, channel select karne ka dropdown aayega
+    view = WelcomeSelectView()
+    await interaction.response.send_message("📌 **Please select your welcome channel from the dropdown below:**", view=view, ephemeral=True)
 
 @bot.tree.command(name="ban", description="Ban a member.")
 @app_commands.checks.has_permissions(ban_members=True)
