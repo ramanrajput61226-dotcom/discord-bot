@@ -463,29 +463,12 @@ async def set_ban_limit(ctx: commands.Context, limit: int):
     res = f"✅ **Anti-Nuke Ban Limit updated to:** `{ban_limit}` bans / 2 mins"
     await ctx.send(res)
 
+ @bot.hybrid_command(name="set_ban_limit", description="Set anti-nuke max ban threshold limit.")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_ban_limit(ctx: commands.Context, limit: int):
     global ban_limit
     ban_limit = limit
-    res = f"✅ **Anti-Nuke Ban Limit updated to:** `{ban_limit}` bans / 2 mins"
-    if is_interaction:
-        await ctx.response.send_message(res)
-    else:
-        await ctx.send(res)
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    user = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
-
-    if not is_whitelisted(user, guild):
-        msg = "❌ **Access Denied:** You need administrator permissions."
-        if is_interaction: await ctx_or_interaction.response.send_message(msg, ephemeral=True)
-        else: await ctx_or_interaction.send(msg)
-        return
-
-    global ban_limit
-    ban_limit = limit
-    res = f"✅ **Anti-Nuke Ban Limit updated to:** `{ban_limit}` bans / 2 mins"
-    if is_interaction: await ctx_or_interaction.response.send_message(res)
-    else: await ctx_or_interaction.send(res)
-
+    await ctx.send(f"✅ **Anti-Nuke Ban Limit updated to:** `{ban_limit}` bans / 2 mins")
 
 @bot.tree.command(name="set_channel_limit", description="Set anti-nuke max channel delete threshold limit.")
 @bot.command(name="set_channel_limit")
