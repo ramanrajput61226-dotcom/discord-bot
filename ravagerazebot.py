@@ -248,7 +248,7 @@ class DynamicTicketModal(Modal):
                 label=truncated_label,
                 placeholder="Type your answer here...",
                 style=discord.TextStyle.paragraph,
-                required=True,
+                required=False,
                 max_length=500
             )
             self.question_inputs.append((q, text_input))
@@ -294,7 +294,8 @@ class DynamicTicketModal(Modal):
         embed.add_field(name="Opened By", value=user.mention, inline=False)
 
         for q, text_input in self.question_inputs:
-            embed.add_field(name=q, value=text_input.value, inline=False)
+            ans_val = text_input.value if text_input.value else "Not Provided"
+            embed.add_field(name=q, value=ans_val, inline=False)
 
         embed.set_footer(text=f"User ID: {user.id}")
 
@@ -363,12 +364,18 @@ class AddMoreButtonModal(Modal):
     def __init__(self):
         super().__init__(title="Add New Ticket Button")
         self.btn_name = TextInput(label="Button Name", placeholder="e.g. Bug Report", required=True, max_length=50)
-        self.q1 = TextInput(label="Question 1", placeholder="Describe the bug:", required=True, max_length=100)
-        self.q2 = TextInput(label="Question 2 (Optional)", placeholder="Steps to reproduce:", required=False, max_length=100)
+        self.q1 = TextInput(label="Question 1", placeholder="Optional question...", required=False, max_length=100)
+        self.q2 = TextInput(label="Question 2", placeholder="Optional question...", required=False, max_length=100)
+        self.q3 = TextInput(label="Question 3", placeholder="Optional question...", required=False, max_length=100)
+        self.q4 = TextInput(label="Question 4", placeholder="Optional question...", required=False, max_length=100)
+        self.q5 = TextInput(label="Question 5", placeholder="Optional question...", required=False, max_length=100)
 
         self.add_item(self.btn_name)
         self.add_item(self.q1)
         self.add_item(self.q2)
+        self.add_item(self.q3)
+        self.add_item(self.q4)
+        self.add_item(self.q5)
 
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
@@ -376,7 +383,7 @@ class AddMoreButtonModal(Modal):
             await interaction.response.send_message("❌ No active ticket config found! Please run `/setup_ticket` first.", ephemeral=True)
             return
 
-        questions = [q.value for q in [self.q1, self.q2] if q.value]
+        questions = [q.value for q in [self.q1, self.q2, self.q3, self.q4, self.q5] if q.value]
         custom_id = f"custom_ticket_{random.randint(1000, 9999)}"
 
         ticket_configs[guild.id]["buttons"][custom_id] = {
@@ -456,27 +463,36 @@ class TicketSetupModal(Modal):
         self.role = role
 
         self.panel_title = TextInput(label="Panel Title", default="Support Hub", max_length=100)
-        
-        # Paragraph style and 4000 length enabled for multiline formatting
         self.panel_desc = TextInput(
             label="Panel Description", 
             style=discord.TextStyle.paragraph, 
             default="Click a button below to open a support ticket.", 
             max_length=4000
         )
-        
         self.btn_name = TextInput(label="First Button Name", placeholder="e.g. General Support", default="Support", max_length=50)
-        self.q1 = TextInput(label="Question 1", placeholder="Describe your issue:", default="What is your issue?", max_length=100)
+        
+        # 5 Optional Questions Slot for initial setup
+        self.q1 = TextInput(label="Question 1", placeholder="Optional question...", required=False, max_length=100)
+        self.q2 = TextInput(label="Question 2", placeholder="Optional question...", required=False, max_length=100)
+        self.q3 = TextInput(label="Question 3", placeholder="Optional question...", required=False, max_length=100)
+        self.q4 = TextInput(label="Question 4", placeholder="Optional question...", required=False, max_length=100)
+        self.q5 = TextInput(label="Question 5", placeholder="Optional question...", required=False, max_length=100)
 
         self.add_item(self.panel_title)
         self.add_item(self.panel_desc)
         self.add_item(self.btn_name)
         self.add_item(self.q1)
+        self.add_item(self.q2)
+        self.add_item(self.q3)
+        self.add_item(self.q4)
+        self.add_item(self.q5)
 
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
         custom_id = f"custom_ticket_{random.randint(1000, 9999)}"
         
+        questions = [q.value for q in [self.q1, self.q2, self.q3, self.q4, self.q5] if q.value]
+
         ticket_configs[guild.id] = {
             "category_id": self.category.id,
             "role_id": self.role.id,
@@ -487,7 +503,7 @@ class TicketSetupModal(Modal):
             "buttons": {
                 custom_id: {
                     "label": self.btn_name.value,
-                    "questions": [self.q1.value]
+                    "questions": questions
                 }
             }
         }
