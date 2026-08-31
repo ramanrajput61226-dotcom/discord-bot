@@ -225,12 +225,13 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 
 
 # ==========================================================
-# ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (MULTI-STEP FINAL FIX)
+# ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (FINAL STABLE FIX)
 # ==========================================================
 
 ticket_configs = {}
 ticket_log_channel_id = None
 custom_ticket_ping = "{role} New ticket opened by {user}"
+temp_setup_cache = {}
 
 
 class DynamicTicketModal(Modal):
@@ -513,19 +514,7 @@ class TicketSetupModal(Modal):
         )
 
 
-# Step 3: Button to open Modal safely without timeout
-class OpenConfigModalButtonView(discord.ui.View):
-    def __init__(self, category, role):
-        super().__init__(timeout=180)
-        self.category = category
-        self.role = role
-
-    @discord.ui.button(label="⚙️ Click to Configure Panel Details", style=discord.ButtonStyle.primary, emoji="📝")
-    async def open_modal_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(TicketSetupModal(self.category, self.role))
-
-
-# Step 2: Role Selection View
+# Step 2: Role Selection View (Directly opens Modal on selection)
 class TicketRoleSelectView(discord.ui.View):
     def __init__(self, category):
         super().__init__(timeout=180)
@@ -534,15 +523,14 @@ class TicketRoleSelectView(discord.ui.View):
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="2️⃣ Select Support Role...", min_values=1, max_values=1)
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
         selected_role = select.values[0]
-        view = OpenConfigModalButtonView(self.category, selected_role)
-        await interaction.response.edit_message(content=f"✅ Category: **{self.category.name}** | Role: **{selected_role.name}**\nNow click the button below to fill out your panel titles and questions:", view=view)
+        # Yahan seedha modal bhej rahe hain bina kisi beech ke button ke, taaki interaction expire na ho
+        await interaction.response.send_modal(TicketSetupModal(self.category, selected_role))
 
 
 # Step 1: Category Selection View
 class TicketCategorySelectView(discord.ui.View):
-    def __init__(self, ctx):
+    def __init__(self):
         super().__init__(timeout=180)
-        self.ctx = ctx
 
     @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="1️⃣ Select Ticket Category...", channel_types=[discord.ChannelType.category], min_values=1, max_values=1)
     async def select_category(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
@@ -554,7 +542,7 @@ class TicketCategorySelectView(discord.ui.View):
 @bot.hybrid_command(name="setup_ticket", description="Setup and deploy a ticket panel with management options.")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup_ticket(ctx: commands.Context):
-    view = TicketCategorySelectView(ctx)
+    view = TicketCategorySelectView()
     await ctx.send("📌 **Ticket Setup Wizard (Step 1):** Select the Category below.", view=view, ephemeral=True)
     
 # ==============================================================================
