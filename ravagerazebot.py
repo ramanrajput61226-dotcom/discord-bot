@@ -30,6 +30,10 @@ custom_prefix = "!"
 ticket_log_channel_id = None
 custom_ticket_ping = "{role}"
 
+# Fully Customizable Ticket Configurations Dictionary per Guild:
+# { guild_id: { "category_id": int, "role_id": int, "title": str, "desc": str, "buttons": {custom_id: {"label": str, "questions": [str]}} } }
+ticket_configs = {}
+
 invite_log_channel_id = None
 welcome_channel_id = None
 custom_welcome_msg = None
@@ -221,16 +225,17 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 
 
 # ==============================================================================
-# ADVANCED TICKET SYSTEM WITH DROPDOWNS & MODALS
+# ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM
 # ==============================================================================
 
-class TicketModal(Modal):
-    def __init__(self, ticket_type: str, questions: list):
-        super().__init__(title=f"{ticket_type} Ticket Form")
-        self.ticket_type = ticket_type
+class DynamicTicketModal(Modal):
+    def __init__(self, button_id: str, button_label: str, questions: list):
+        super().__init__(title=f"{button_label} Ticket Form")
+        self.button_id = button_id
+        self.button_label = button_label
         self.question_inputs = []
 
-        for idx, q in enumerate(questions):
+        for q in questions:
             truncated_label = q[:45] + "..." if len(q) > 48 else q
             text_input = TextInput(
                 label=truncated_label,
@@ -244,19 +249,24 @@ class TicketModal(Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-
         guild = interaction.guild
         user = interaction.user
+        config = ticket_configs.get(guild.id, {})
 
-        # Create overwrites for ticket channel
+        category_id = config.get("category_id")
+        category = guild.get_channel(category_id) if category_id else None
+
+        role_id = config.get("role_id")
+        support_role = guild.get_role(role_id) if role_id else None
+
+        # Create overwrites
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True)
         }
-
-        # Attempt to put in category if any exists
-        category = interaction.channel.category if isinstance(interaction.channel, discord.TextChannel) else None
+        if support_role:
+            overwrites[support_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
         ticket_channel_name = f"ticket-{user.name}".lower().replace(" ", "-")
         ticket_channel = await guild.create_text_channel(
@@ -266,9 +276,8 @@ class TicketModal(Modal):
             reason=f"Support ticket opened by {user}"
         )
 
-        # Build responses embed
         embed = discord.Embed(
-            title=f"🎫 {self.ticket_type} Ticket",
+            title=f"🎫 {self.button_label} Ticket",
             description=f"Ticket opened by {user.mention}\nPlease wait patiently for staff assistance.",
             color=discord.Color.blue(),
             timestamp=datetime.now(timezone.utc)
@@ -280,55 +289,29 @@ class TicketModal(Modal):
         embed.set_footer(text=f"User ID: {user.id}")
 
         close_view = TicketControlView()
-        ping_content = custom_ticket_ping.replace("{user}", user.mention).replace("{role}", "@here")
+        
+        # Format ping message
+        role_mention = support_role.mention if support_role else "@here"
+        ping_content = custom_ticket_ping.replace("{user}", user.mention).replace("{role}", role_mention)
 
         await ticket_channel.send(content=ping_content, embed=embed, view=close_view)
         await interaction.followup.send(f"✅ Your ticket has been created successfully: {ticket_channel.mention}", ephemeral=True)
 
 
-class TicketDropdown(discord.ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(
-                label="Player Report",
-                description="Report a player for rule-breaking or misconduct",
-                emoji="⚖️",
-                value="Player Report"
-            ),
-            discord.SelectOption(
-                label="Bug Report",
-                description="Report a server glitch, bug, or exploit",
-                emoji="🐛",
-                value="Bug Report"
-            )
-        ]
-        super().__init__(placeholder="Select ticket category...", min_values=1, max_values=1, options=options)
+class DynamicTicketButtonView(discord.ui.View):
+    def __init__(self, buttons_data: dict):
+        super().__init__(timeout=None)
+        for custom_id, data in buttons_data.items():
+            self.add_item(DynamicTicketButton(custom_id, data["label"], data["questions"]))
+
+class DynamicTicketButton(discord.ui.Button):
+    def __init__(self, custom_id: str, label: str, questions: list):
+        super().__init__(style=discord.ButtonStyle.primary, label=label, custom_id=custom_id)
+        self.questions = questions
 
     async def callback(self, interaction: discord.Interaction):
-        selected = self.values[0]
-        if selected == "Player Report":
-            questions = [
-                "What is the username/ID of the player you are reporting?",
-                "What rule did they break or what did they do?",
-                "Provide evidence (imgur links, video clips, screenshots):"
-            ]
-        elif selected == "Bug Report":
-            questions = [
-                "Where did you encounter the bug?",
-                "Describe how the bug occurred step-by-step:",
-                "Can you replicate this bug consistently?"
-            ]
-        else:
-            questions = ["Describe your issue in detail:"]
-
-        modal = TicketModal(ticket_type=selected, questions=questions)
+        modal = DynamicTicketModal(self.custom_id, self.label, self.questions)
         await interaction.response.send_modal(modal)
-
-
-class TicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(TicketDropdown())
 
 
 class TicketControlView(discord.ui.View):
@@ -339,7 +322,6 @@ class TicketControlView(discord.ui.View):
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("🔒 Ticket closing in 5 seconds...", ephemeral=False)
         
-        # Transcript logging logic if log channel is configured
         if ticket_log_channel_id:
             log_chan = interaction.guild.get_channel(ticket_log_channel_id)
             if log_chan:
@@ -366,6 +348,111 @@ class TicketControlView(discord.ui.View):
             await interaction.channel.delete(reason=f"Ticket closed by {interaction.user}")
         except Exception:
             pass
+
+
+# Wizard Modal for Setup Ticket Configuration
+class TicketSetupWizardModal(Modal):
+    def __init__(self, category: discord.CategoryChannel, role: discord.Role):
+        super().__init__(title="Configure Ticket Panel Details")
+        self.category = category
+        self.role = role
+
+        self.panel_title = TextInput(
+            label="Panel Title",
+            default="Support Ticket Panel",
+            max_length=100
+        )
+        self.panel_desc = TextInput(
+            label="Panel Description",
+            style=discord.TextStyle.paragraph,
+            default="Click a button below to open a support ticket.",
+            max_length=500
+        )
+        self.add_item(self.panel_title)
+        self.add_item(self.panel_desc)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        
+        # Default questions/buttons if user wants a starting point, fully editable via config commands
+        default_buttons = {
+            "ticket_btn_1": {
+                "label": "Player Report",
+                "questions": [
+                    "What is the username/ID of the player?",
+                    "What rule did they break?",
+                    "Provide evidence links:"
+                ]
+            },
+            "ticket_btn_2": {
+                "label": "General Support",
+                "questions": [
+                    "Describe your issue in detail:"
+                ]
+            }
+        }
+
+        ticket_configs[guild.id] = {
+            "category_id": self.category.id,
+            "role_id": self.role.id,
+            "title": self.panel_title.value,
+            "desc": self.panel_desc.value,
+            "buttons": default_buttons
+        }
+
+        embed = discord.Embed(
+            title=self.panel_title.value,
+            description=self.panel_desc.value,
+            color=discord.Color.blue()
+        )
+        view = DynamicTicketButtonView(default_buttons)
+        
+        await interaction.channel.send(embed=embed, view=view)
+        await interaction.response.send_message("✅ **Ticket Panel deployed successfully with your custom configuration!** Use `/edit_ticket` to update buttons/questions anytime.", ephemeral=True)
+
+
+class TicketSetupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="1️⃣ Select Category where tickets will be created...", channel_types=[discord.ChannelType.category], min_values=1, max_values=1)
+    async def select_category(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        self.selected_category = select.values[0]
+        await interaction.response.send_message(f"✅ Category selected: **{self.selected_category.name}**. Now select the Support Role using the dropdown below.", ephemeral=True)
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="2️⃣ Select Support Role to ping inside tickets...", min_values=1, max_values=1)
+    async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        if not hasattr(self, 'selected_category'):
+            await interaction.response.send_message("❌ Please select a Category first!", ephemeral=True)
+            return
+        selected_role = select.values[0]
+        await interaction.response.send_modal(TicketSetupWizardModal(self.selected_category, selected_role))
+
+
+@bot.hybrid_command(name="setup_ticket", description="Interactive setup wizard for fully customizable tickets.")
+@app_commands.checks.has_permissions(administrator=True)
+async def setup_ticket(ctx: commands.Context):
+    view = TicketSetupView()
+    await ctx.send("📌 **Ticket Setup Wizard:** Please select the target Category and Support Role below.", view=view, ephemeral=True)
+
+
+@bot.hybrid_command(name="add_ticket_button", description="Add a new custom button and questions to your ticket panel.")
+@app_commands.describe(button_name="Name of the ticket button", question_1="First question to ask", question_2="Optional second question", question_3="Optional third question")
+@app_commands.checks.has_permissions(administrator=True)
+async def add_ticket_button(ctx: commands.Context, button_name: str, question_1: str, question_2: str = None, question_3: str = None):
+    guild = ctx.guild
+    if guild.id not in ticket_configs:
+        await ctx.send("❌ Please run `/setup_ticket` first to initialize panel settings.", ephemeral=True)
+        return
+
+    questions = [q for q in [question_1, question_2, question_3] if q]
+    custom_id = f"custom_ticket_{random.randint(1000, 9999)}"
+    
+    ticket_configs[guild.id]["buttons"][custom_id] = {
+        "label": button_name,
+        "questions": questions
+    }
+    await ctx.send(f"✅ Successfully added new ticket button **{button_name}** with `{len(questions)}` questions! Re-send your panel using `/setup_ticket` or update it.", ephemeral=True)
 
 
 # ==============================================================================
@@ -459,7 +546,6 @@ async def giveaway(
 async def set_ban_limit(ctx: commands.Context, limit: int):
     global ban_limit
     ban_limit = limit
-    
     res = f"✅ **Anti-Nuke Ban Limit updated to:** `{ban_limit}` bans / 2 mins"
     await ctx.send(res)
 
@@ -503,18 +589,6 @@ async def set_ticket_ping(ctx: commands.Context, message: str):
     global custom_ticket_ping
     custom_ticket_ping = message
     await ctx.send(f"✅ **Ticket Open Ping updated!**\nFormat: `{message}`")
-
-
-@bot.hybrid_command(name="setup_ticket", description="Send ticket panel interface with dropdown menu.")
-@app_commands.checks.has_permissions(administrator=True)
-async def setup_ticket(ctx: commands.Context):
-    embed = discord.Embed(
-        title="Support Ticket Panel",
-        description="Select an option from the dropdown menu below to open a ticket.",
-        color=discord.Color.blue()
-    )
-    view = TicketView()
-    await ctx.send(embed=embed, view=view)
 
 
 # ==============================================================================
@@ -772,7 +846,8 @@ async def help_antinuke(ctx: commands.Context):
 @bot.hybrid_command(name="ticket_help", description="Show all Ticket Panel management commands.")
 async def help_ticket(ctx: commands.Context):
     embed = discord.Embed(title="🎫 Ticket System Commands", color=discord.Color.blue())
-    embed.add_field(name="/setup_ticket", value="Send ticket panel interface with dropdown", inline=False)
+    embed.add_field(name="/setup_ticket", value="Interactive wizard to set category, role, title & buttons", inline=False)
+    embed.add_field(name="/add_ticket_button <name> <q1> [q2] [q3]", value="Add custom buttons and questions easily", inline=False)
     embed.add_field(name="/ticket_log_channel <channel>", value="Set channel for transcripts", inline=False)
     embed.add_field(name="/set_ticket_ping <msg>", value="Set custom mention message", inline=False)
     await ctx.send(embed=embed)
