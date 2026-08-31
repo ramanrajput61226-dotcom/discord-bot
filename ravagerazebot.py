@@ -359,83 +359,37 @@ class TicketControlView(discord.ui.View):
             pass
 
 
-class AddButtonQuestionsModal(Modal):
-    def __init__(self, category, role, title, desc, t_title, t_desc, btn_name):
-        super().__init__(title=f"Questions for: {btn_name}")
-        self.category = category
-        self.role = role
-        self.title_text = title
-        self.desc_text = desc
-        self.t_title = t_title
-        self.t_desc = t_desc
-        self.btn_name = btn_name
+class AddMoreButtonModal(Modal):
+    def __init__(self):
+        super().__init__(title="Add New Ticket Button")
+        self.btn_name = TextInput(label="Button Name", placeholder="e.g. Bug Report", required=True, max_length=50)
+        self.q1 = TextInput(label="Question 1", placeholder="Describe the bug:", required=True, max_length=100)
+        self.q2 = TextInput(label="Question 2 (Optional)", placeholder="Steps to reproduce:", required=False, max_length=100)
 
-        self.q1 = TextInput(label="Question 1 (Required)", placeholder="e.g. What is your in-game UID?", required=True, max_length=100)
-        self.q2 = TextInput(label="Question 2 (Optional)", placeholder="e.g. What is your role?", required=False, max_length=100)
-        self.q3 = TextInput(label="Question 3 (Optional)", placeholder="e.g. Provide profile link:", required=False, max_length=100)
-
+        self.add_item(self.btn_name)
         self.add_item(self.q1)
         self.add_item(self.q2)
-        self.add_item(self.q3)
 
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
-        questions = [q.value for q in [self.q1, self.q2, self.q3] if q.value]
-        
-        custom_id = f"custom_ticket_{random.randint(1000, 9999)}"
-        
         if guild.id not in ticket_configs:
-            ticket_configs[guild.id] = {
-                "category_id": self.category.id,
-                "role_id": self.role.id,
-                "title": self.title_text,
-                "desc": self.desc_text,
-                "ticket_title": self.t_title,
-                "ticket_desc": self.t_desc,
-                "buttons": {}
-            }
-        
+            await interaction.response.send_message("❌ No active ticket config found! Please run `/setup_ticket` first.", ephemeral=True)
+            return
+
+        questions = [q.value for q in [self.q1, self.q2] if q.value]
+        custom_id = f"custom_ticket_{random.randint(1000, 9999)}"
+
         ticket_configs[guild.id]["buttons"][custom_id] = {
-            "label": self.btn_name,
+            "label": self.btn_name.value,
             "questions": questions
         }
 
-        view = PostButtonAddView(self.category, self.role, self.title_text, self.desc_text, self.t_title, self.t_desc)
-        await interaction.response.send_message(
-            f"✅ Button **{self.btn_name}** added successfully!\n\nWhat would you like to do next?",
-            view=view,
-            ephemeral=True
-        )
-
-
-class ButtonNameModal(Modal):
-    def __init__(self, category, role, title, desc, t_title, t_desc):
-        super().__init__(title="Add Ticket Button")
-        self.category = category
-        self.role = role
-        self.title_text = title
-        self.desc_text = desc
-        self.t_title = t_title
-        self.t_desc = t_desc
-
-        self.btn_name = TextInput(label="Button Label Name", placeholder="e.g. Team Apply / General Support", required=True, max_length=80)
-        self.add_item(self.btn_name)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(
-            AddButtonQuestionsModal(self.category, self.role, self.title_text, self.desc_text, self.t_title, self.t_desc, self.btn_name.value)
-        )
+        view = PostButtonManagerView()
+        await interaction.response.send_message(f"✅ Button **{self.btn_name.value}** added successfully! Use the panel below to add more or deploy.", view=view, ephemeral=True)
 
 
 class RemoveButtonSelect(discord.ui.Select):
-    def __init__(self, guild_id: int, category, role, title, desc, t_title, t_desc):
-        self.category = category
-        self.role = role
-        self.title_text = title
-        self.desc_text = desc
-        self.t_title = t_title
-        self.t_desc = t_desc
-        
+    def __init__(self, guild_id: int):
         buttons = ticket_configs.get(guild_id, {}).get("buttons", {})
         options = [
             discord.SelectOption(label=data["label"], value=cid, description=f"ID: {cid}")
@@ -450,29 +404,23 @@ class RemoveButtonSelect(discord.ui.Select):
         
         del ticket_configs[guild_id]["buttons"][selected_cid]
         
-        view = PostButtonAddView(self.category, self.role, self.title_text, self.desc_text, self.t_title, self.t_desc)
+        view = PostButtonManagerView()
         await interaction.response.send_message(f"🗑️ Button **{btn_label}** removed successfully!", view=view, ephemeral=True)
 
 
 class RemoveButtonView(discord.ui.View):
-    def __init__(self, guild_id: int, category, role, title, desc, t_title, t_desc):
+    def __init__(self, guild_id: int):
         super().__init__(timeout=60)
-        self.add_item(RemoveButtonSelect(guild_id, category, role, title, desc, t_title, t_desc))
+        self.add_item(RemoveButtonSelect(guild_id))
 
 
-class PostButtonAddView(discord.ui.View):
-    def __init__(self, category, role, title, desc, t_title, t_desc):
+class PostButtonManagerView(discord.ui.View):
+    def __init__(self):
         super().__init__(timeout=120)
-        self.category = category
-        self.role = role
-        self.title_text = title
-        self.desc_text = desc
-        self.t_title = t_title
-        self.t_desc = t_desc
 
     @discord.ui.button(label="➕ Add Button", style=discord.ButtonStyle.secondary, emoji="➕")
-    async def add_more(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ButtonNameModal(self.category, self.role, self.title_text, self.desc_text, self.t_title, self.t_desc))
+    async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AddMoreButtonModal())
 
     @discord.ui.button(label="🗑️ Remove Button", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def remove_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -480,20 +428,19 @@ class PostButtonAddView(discord.ui.View):
         if not ticket_configs.get(guild_id, {}).get("buttons"):
             await interaction.response.send_message("❌ No buttons available to remove!", ephemeral=True)
             return
-        view = RemoveButtonView(guild_id, self.category, self.role, self.title_text, self.desc_text, self.t_title, self.t_desc)
-        await interaction.response.send_message("Select the button you want to remove:", view=view, ephemeral=True)
+        await interaction.response.send_message("Select the button you want to remove:", view=RemoveButtonView(guild_id), ephemeral=True)
 
     @discord.ui.button(label="🚀 Deploy Panel", style=discord.ButtonStyle.success, emoji="✅")
     async def deploy_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         config = ticket_configs.get(guild.id)
         if not config or not config["buttons"]:
-            await interaction.response.send_message("❌ You must add at least one button before deploying!", ephemeral=True)
+            await interaction.response.send_message("❌ You must have at least one button to deploy!", ephemeral=True)
             return
 
         embed = discord.Embed(
-            title=self.title_text,
-            description=self.desc_text,
+            title=config["title"],
+            description=config["desc"],
             color=discord.Color.blue()
         )
         view = DynamicTicketButtonView(config["buttons"])
@@ -502,83 +449,73 @@ class PostButtonAddView(discord.ui.View):
         await interaction.response.send_message("🎉 **Ticket Panel deployed successfully in this channel!**", ephemeral=True)
 
 
-class TicketInnerSetupModal(Modal):
-    def __init__(self, category, role, panel_title, panel_desc):
-        super().__init__(title="Inside Ticket Settings")
-        self.category = category
-        self.role = role
-        self.panel_title = panel_title
-        self.panel_desc = panel_desc
-
-        self.ticket_title = TextInput(
-            label="Ticket Embed Title",
-            default="🛡️ Team Apex Support Ticket",
-            max_length=100
-        )
-        self.ticket_desc = TextInput(
-            label="Ticket Embed Description",
-            style=discord.TextStyle.short,
-            default="Please provide details below. Staff will assist soon.",
-            max_length=200
-        )
-        self.add_item(self.ticket_title)
-        self.add_item(self.ticket_desc)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(
-            ButtonNameModal(self.category, self.role, self.panel_title, self.panel_desc, self.ticket_title.value, self.ticket_desc.value)
-        )
-
-
-class TicketSetupWizardModal(Modal):
+class TicketSetupModal(Modal):
     def __init__(self, category, role):
-        super().__init__(title="Panel Setup (Title & Desc)")
+        super().__init__(title="Configure Ticket Panel")
         self.category = category
         self.role = role
 
-        self.panel_title = TextInput(
-            label="Panel Title",
-            default="🛡️ Team Apex Support Hub",
-            max_length=100
-        )
-        self.panel_desc = TextInput(
-            label="Panel Description",
-            style=discord.TextStyle.short,
-            default="Welcome to Team Apex Official Support! Select an option below.",
-            max_length=200
-        )
+        self.panel_title = TextInput(label="Panel Title", default="🛡️ Support Hub", max_length=100)
+        self.panel_desc = TextInput(label="Panel Description", style=discord.TextStyle.short, default="Click a button below to open a support ticket.", max_length=200)
+        self.btn_name = TextInput(label="First Button Name", placeholder="e.g. General Support", default="Support", max_length=50)
+        self.q1 = TextInput(label="Question 1", placeholder="Describe your issue:", default="What is your issue?", max_length=100)
+
         self.add_item(self.panel_title)
         self.add_item(self.panel_desc)
+        self.add_item(self.btn_name)
+        self.add_item(self.q1)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(
-            TicketInnerSetupModal(self.category, self.role, self.panel_title.value, self.panel_desc.value)
+        guild = interaction.guild
+        custom_id = f"custom_ticket_{random.randint(1000, 9999)}"
+        
+        ticket_configs[guild.id] = {
+            "category_id": self.category.id,
+            "role_id": self.role.id,
+            "title": self.panel_title.value,
+            "desc": self.panel_desc.value,
+            "ticket_title": f"🎫 {self.btn_name.value} Ticket",
+            "ticket_desc": f"Ticket opened by {interaction.user.mention}\nPlease wait patiently.",
+            "buttons": {
+                custom_id: {
+                    "label": self.btn_name.value,
+                    "questions": [self.q1.value]
+                }
+            }
+        }
+
+        view = PostButtonManagerView()
+        await interaction.response.send_message(
+            f"✅ Initial setup saved! You can now add more buttons or deploy the panel right here.",
+            view=view,
+            ephemeral=True
         )
 
 
 class TicketSetupView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
+        self.selected_category = None
 
-    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="1️⃣ Select Category where tickets will be created...", channel_types=[discord.ChannelType.category], min_values=1, max_values=1)
+    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="1️⃣ Select Category...", channel_types=[discord.ChannelType.category], min_values=1, max_values=1)
     async def select_category(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
         self.selected_category = select.values[0]
-        await interaction.response.send_message(f"✅ Category selected: **{self.selected_category.name}**. Now select the Support Role using the dropdown below.", ephemeral=True)
+        await interaction.response.edit_message(content=f"✅ Category selected: **{self.selected_category.name}**. Now select the Support Role below.")
 
-    @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="2️⃣ Select Support Role to ping inside tickets...", min_values=1, max_values=1)
+    @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="2️⃣ Select Support Role...", min_values=1, max_values=1)
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
-        if not hasattr(self, 'selected_category'):
+        if not self.selected_category:
             await interaction.response.send_message("❌ Please select a Category first!", ephemeral=True)
             return
         selected_role = select.values[0]
-        await interaction.response.send_modal(TicketSetupWizardModal(self.selected_category, selected_role))
+        await interaction.response.send_modal(TicketSetupModal(self.selected_category, selected_role))
 
 
-@bot.hybrid_command(name="setup_ticket", description="Fully custom interactive wizard to build and manage ticket panels.")
+@bot.hybrid_command(name="setup_ticket", description="Setup and deploy a ticket panel with management options.")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup_ticket(ctx: commands.Context):
     view = TicketSetupView()
-    await ctx.send("📌 **Ticket Setup Wizard:** Please select the target Category and Support Role below.", view=view, ephemeral=True)
+    await ctx.send("📌 **Ticket Setup Wizard:** Select the Category and Support Role below.", view=view, ephemeral=True)
     
 # ==============================================================================
 # GIVEAWAY SYSTEM WITH FIXED / CUSTOM WINNER LOGIC
