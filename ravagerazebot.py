@@ -371,26 +371,24 @@ class TicketControlView(discord.ui.View):
 # GIVEAWAY SYSTEM WITH FIXED / CUSTOM WINNER LOGIC
 # ==============================================================================
 
-@bot.tree.command(name="giveaway", description="Start an interactive giveaway with optional fixed winner.")
+@bot.hybrid_command(name="giveaway", description="Start an interactive giveaway with optional fixed winner.")
 @app_commands.describe(
     prize="The prize being given away",
     duration="Duration format (e.g. 30s, 10m, 2h, 1d)",
     winners_count="Number of winners to pick",
     fixed_winner="Optional specific member to guarantee as a winner"
 )
-@bot.command(name="giveaway", help="Start a giveaway")
-@app_commands.checks.has_permissions(manage_guild=True)
-async def giveaway_slash(
-    ctx_or_interaction, 
+@commands.has_permissions(manage_guild=True)
+async def giveaway(
+    ctx: commands.Context, 
     prize: str, 
     duration: str, 
     winners_count: int = 1, 
     fixed_winner: discord.Member = None
 ):
-    is_interaction = isinstance(ctx_or_interaction, discord.Interaction)
-    channel = ctx_or_interaction.channel if is_interaction else ctx_or_interaction.message.channel
-    author = ctx_or_interaction.user if is_interaction else ctx_or_interaction.author
-    guild = ctx_or_interaction.guild
+    channel = ctx.channel
+    author = ctx.author
+    guild = ctx.guild
 
     seconds = parse_time(duration)
 
@@ -402,11 +400,7 @@ async def giveaway_slash(
     )
     embed.set_footer(text=f"Ends in {duration}")
 
-    if is_interaction:
-        await ctx_or_interaction.response.send_message(embed=embed)
-        msg = await ctx_or_interaction.original_response()
-    else:
-        msg = await ctx_or_interaction.send(embed=embed)
+    msg = await ctx.send(embed=embed)
 
     await msg.add_reaction("🎉")
     await asyncio.sleep(seconds)
@@ -453,7 +447,6 @@ async def giveaway_slash(
             timestamp=datetime.now(timezone.utc)
         )
         await msg.edit(embed=ended_embed, view=None)
-
 
 # ==============================================================================
 # CONFIGURATION COMMANDS (ANTI-NUKE, PREFIX, LIMITS)
