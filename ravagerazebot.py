@@ -793,35 +793,39 @@ async def slash_setup_welcome(interaction: discord.Interaction, channel: discord
     await interaction.response.send_message(f"✅ **Welcome channel set to:** {target.mention}")
 
 
-@bot.tree.command(name="setup_welcome_wizard", description="Launch interactive setup wizard for welcome messages & images.")
+class SimpleWelcomeModal(Modal, title="Configure Welcome Message"):
+    wel_msg = TextInput(
+        label="Welcome Message", 
+        style=discord.TextStyle.paragraph, 
+        default="Hey {user}, welcome to **{server}**! Member count: {count}", 
+        max_length=1000
+    )
+    wel_img = TextInput(
+        label="Banner Image URL (Optional)", 
+        required=False, 
+        placeholder="Paste image link here or leave blank",
+        default=""
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        global custom_welcome_msg, custom_welcome_img, welcome_enabled
+        custom_welcome_msg = self.wel_msg.value
+        custom_welcome_img = self.wel_img.value.strip() if self.wel_img.value else None
+        welcome_enabled = True
+        
+        await interaction.response.send_message(
+            f"✅ **Welcome message successfully updated!**\n\n**Message:** `{custom_welcome_msg}`", 
+            ephemeral=True
+        )
+
+@bot.tree.command(name="setup_welcome", description="Configure custom welcome message and banner.")
 @app_commands.checks.has_permissions(administrator=True)
-async def slash_setup_welcome_wizard(interaction: discord.Interaction):
+async def slash_setup_welcome(interaction: discord.Interaction):
     if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
         return
-    await interaction.response.send_modal(WelcomeSetupModal())
-
-
-@bot.tree.command(name="set_welcomemsg", description="Set custom welcome text.")
-@app_commands.checks.has_permissions(administrator=True)
-async def slash_set_welcomemsg(interaction: discord.Interaction, message: str):
-    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
-        return
-    global custom_welcome_msg
-    custom_welcome_msg = message
-    await interaction.response.send_message("✅ **Custom Welcome Message Set!**")
-
-
-@bot.tree.command(name="set_welcomeimg", description="Set banner image URL.")
-@app_commands.checks.has_permissions(administrator=True)
-async def slash_set_welcomeimg(interaction: discord.Interaction, url: str):
-    if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
-        return
-    global custom_welcome_img
-    custom_welcome_img = url
-    await interaction.response.send_message(f"✅ **Image Set:** {url}")
+    
+    await interaction.response.send_modal(SimpleWelcomeModal())
 
 
 @bot.tree.command(name="disable_welcome", description="Disable welcome messages.")
