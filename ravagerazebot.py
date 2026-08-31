@@ -752,25 +752,32 @@ async def slash_invites(interaction: discord.Interaction, member: discord.Member
 
 
 @bot.tree.command(name="dmall", description="Send DM announcement to all server members.")
+@app_commands.describe(message="The message you want to broadcast", as_embed="True for Embed format, False for Plain Text")
 @app_commands.checks.has_permissions(administrator=True)
-async def slash_dmall(interaction: discord.Interaction, message: str):
+async def slash_dmall(interaction: discord.Interaction, message: str, as_embed: bool = False):
     if not is_whitelisted(interaction.user, interaction.guild) and not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ **Access Denied:** You need administrator permissions.", ephemeral=True)
         return
-    await interaction.response.send_message("⏳ **Starting DM Broadcast...** Safe delay active.")
+        
+    format_type = "Embed" if as_embed else "Plain Text"
+    await interaction.response.send_message(f"⏳ **Starting DM Broadcast ({format_type})...** Safe delay active.")
     success_count, failed_count = 0, 0
-    embed = discord.Embed(title=f"📢 Announcement from {interaction.guild.name}", description=message, color=discord.Color.gold())
 
     for member in interaction.guild.members:
         if member.bot: continue
         try:
-            await member.send(embed=embed)
+            if as_embed:
+                embed = discord.Embed(title=f"📢 Announcement from {interaction.guild.name}", description=message, color=discord.Color.gold())
+                await member.send(embed=embed)
+            else:
+                await member.send(content=message)
+                
             success_count += 1
             await asyncio.sleep(1.5)
         except Exception:
             failed_count += 1
 
-    await interaction.followup.send(f"✅ Sent: {success_count} | ❌ Failed: {failed_count}")
+    await interaction.followup.send(f"✅ Sent ({format_type}): {success_count} | ❌ Failed: {failed_count}")
 
 
 @bot.tree.command(name="setup_welcome", description="Set welcome channel.")
