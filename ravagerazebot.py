@@ -455,8 +455,16 @@ class TicketSetupModal(Modal):
         self.category = category
         self.role = role
 
-        self.panel_title = TextInput(label="Panel Title", default="🛡️ Support Hub", max_length=100)
-        self.panel_desc = TextInput(label="Panel Description", style=discord.TextStyle.short, default="Click a button below to open a support ticket.", max_length=200)
+        self.panel_title = TextInput(label="Panel Title", default="Support Hub", max_length=100)
+        
+        # Paragraph style and 4000 length enabled for multiline formatting
+        self.panel_desc = TextInput(
+            label="Panel Description", 
+            style=discord.TextStyle.paragraph, 
+            default="Click a button below to open a support ticket.", 
+            max_length=4000
+        )
+        
         self.btn_name = TextInput(label="First Button Name", placeholder="e.g. General Support", default="Support", max_length=50)
         self.q1 = TextInput(label="Question 1", placeholder="Describe your issue:", default="What is your issue?", max_length=100)
 
