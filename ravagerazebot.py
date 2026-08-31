@@ -224,9 +224,9 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
         print(f"Error in on_guild_channel_delete anti-nuke: {e}")
 
 
-# ==============================================================================
+# ==========================================================
 # ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (INTERACTIVE PANEL & MANAGEMENT)
-# ==============================================================================
+# ==========================================================
 
 # Global configuration storage
 # format: guild_id = { "category_id": int, "role_id": int, "title": str, "desc": str, "ticket_title": str, "ticket_desc": str, "buttons": { custom_id: { "label": str, "questions": list } } }
@@ -282,7 +282,6 @@ class DynamicTicketModal(Modal):
             reason=f"Support ticket opened by {user}"
         )
 
-        # Custom Ticket Title & Description from config or default fallback
         t_title = config.get("ticket_title", f"🎫 {self.button_label} Ticket")
         t_desc = config.get("ticket_desc", f"Ticket opened by {user.mention}\nPlease wait patiently for staff assistance.")
 
@@ -360,7 +359,6 @@ class TicketControlView(discord.ui.View):
             pass
 
 
-# Modal to take Questions for a button
 class AddButtonQuestionsModal(Modal):
     def __init__(self, category, role, title, desc, t_title, t_desc, btn_name):
         super().__init__(title=f"Questions for: {btn_name}")
@@ -410,7 +408,6 @@ class AddButtonQuestionsModal(Modal):
         )
 
 
-# Modal for Button Label Name
 class ButtonNameModal(Modal):
     def __init__(self, category, role, title, desc, t_title, t_desc):
         super().__init__(title="Add Ticket Button")
@@ -430,7 +427,6 @@ class ButtonNameModal(Modal):
         )
 
 
-# Dropdown view to Remove an existing button if needed
 class RemoveButtonSelect(discord.ui.Select):
     def __init__(self, guild_id: int, category, role, title, desc, t_title, t_desc):
         self.category = category
@@ -464,7 +460,6 @@ class RemoveButtonView(discord.ui.View):
         self.add_item(RemoveButtonSelect(guild_id, category, role, title, desc, t_title, t_desc))
 
 
-# View after adding/managing buttons
 class PostButtonAddView(discord.ui.View):
     def __init__(self, category, role, title, desc, t_title, t_desc):
         super().__init__(timeout=120)
@@ -507,7 +502,6 @@ class PostButtonAddView(discord.ui.View):
         await interaction.response.send_message("🎉 **Ticket Panel deployed successfully in this channel!**", ephemeral=True)
 
 
-# Modal for Inside Ticket Title & Description
 class TicketInnerSetupModal(Modal):
     def __init__(self, category, role, panel_title, panel_desc):
         super().__init__(title="Inside Ticket Settings")
@@ -523,21 +517,19 @@ class TicketInnerSetupModal(Modal):
         )
         self.ticket_desc = TextInput(
             label="Ticket Embed Description",
-            style=discord.TextStyle.paragraph,
-            default="Please provide the required details below. Our staff will connect with you shortly.",
-            max_length=500
+            style=discord.TextStyle.short,
+            default="Please provide details below. Staff will assist soon.",
+            max_length=200
         )
         self.add_item(self.ticket_title)
         self.add_item(self.ticket_desc)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Now ask to add the first button
         await interaction.response.send_modal(
             ButtonNameModal(self.category, self.role, self.panel_title, self.panel_desc, self.ticket_title.value, self.ticket_desc.value)
         )
 
 
-# Modal for Panel Title & Description
 class TicketSetupWizardModal(Modal):
     def __init__(self, category, role):
         super().__init__(title="Panel Setup (Title & Desc)")
@@ -551,15 +543,14 @@ class TicketSetupWizardModal(Modal):
         )
         self.panel_desc = TextInput(
             label="Panel Description",
-            style=discord.TextStyle.paragraph,
-            default="Welcome to Team Apex Official Support! Select an option below to open a ticket, and our staff will assist you shortly.",
-            max_length=500
+            style=discord.TextStyle.short,
+            default="Welcome to Team Apex Official Support! Select an option below.",
+            max_length=200
         )
         self.add_item(self.panel_title)
         self.add_item(self.panel_desc)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Proceed to configure inner ticket title & description
         await interaction.response.send_modal(
             TicketInnerSetupModal(self.category, self.role, self.panel_title.value, self.panel_desc.value)
         )
@@ -588,8 +579,7 @@ class TicketSetupView(discord.ui.View):
 async def setup_ticket(ctx: commands.Context):
     view = TicketSetupView()
     await ctx.send("📌 **Ticket Setup Wizard:** Please select the target Category and Support Role below.", view=view, ephemeral=True)
-
-
+    
 # ==============================================================================
 # GIVEAWAY SYSTEM WITH FIXED / CUSTOM WINNER LOGIC
 # ==============================================================================
