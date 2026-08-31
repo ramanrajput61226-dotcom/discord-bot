@@ -225,8 +225,16 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 
 
 # ==========================================================
-# ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (COMMAND ARGS FIX)
+# ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (FULL CODE WITH FIX)
 # ==========================================================
+
+import discord
+from discord.ext import commands
+from discord import app_commands, Modal, TextInput
+import asyncio
+import os
+import random
+from datetime import datetime, timezone
 
 ticket_configs = {}
 ticket_log_channel_id = None
@@ -520,9 +528,8 @@ class TicketSetupModal(Modal):
 )
 @app_commands.checks.has_permissions(administrator=True)
 async def setup_ticket(ctx: commands.Context, category: discord.CategoryChannel, role: discord.Role):
-    # Seedha command arguments se category aur role mil jayega, aur turant modal khul jayega!
     modal = TicketSetupModal(category, role)
-    await ctx.interaction.response.send_modal(modal)
+    await ctx.send_modal(modal)
     
 # ==============================================================================
 # GIVEAWAY SYSTEM WITH FIXED / CUSTOM WINNER LOGIC
