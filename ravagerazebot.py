@@ -522,9 +522,9 @@ class TicketSetupView(discord.ui.View):
 
     @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="1️⃣ Select Category...", channel_types=[discord.ChannelType.category], min_values=1, max_values=1)
     async def select_category(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
-        await interaction.response.defer()
         self.selected_category = select.values[0]
-        await interaction.edit_original_response(content=f"✅ Category selected: **{self.selected_category.name}**. Now select the Support Role below.")
+        # Turant interaction response bhej rahe hain bina defer ke taaki timeout na ho
+        await interaction.response.edit_message(content=f"✅ Category selected: **{self.selected_category.name}**. Now select the Support Role below.")
 
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="2️⃣ Select Support Role...", min_values=1, max_values=1)
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
