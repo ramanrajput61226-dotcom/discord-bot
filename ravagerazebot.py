@@ -137,7 +137,6 @@ class TicketDropdown(discord.ui.Select):
     def __init__(self):
         options = []
         for opt in ticket_options:
-            # NO EMOJIS INCLUDED HERE
             options.append(discord.SelectOption(label=opt["label"], description=opt["description"]))
         super().__init__(placeholder="Select a ticket type to open...", min_values=1, max_values=1, options=options)
 
@@ -850,3 +849,4 @@ if BOT_TOKEN:
     bot.run(BOT_TOKEN)
 else:
     print("❌ Error: DISCORD_TOKEN environment variable not found!")
+
