@@ -471,7 +471,6 @@ class TicketSetupModal(Modal):
         )
         self.btn_name = TextInput(label="First Button Name", placeholder="e.g. General Support", default="Support", max_length=50)
         
-        # 5 Optional Questions Slot for initial setup
         self.q1 = TextInput(label="Question 1", placeholder="Optional question...", required=False, max_length=100)
         self.q2 = TextInput(label="Question 2", placeholder="Optional question...", required=False, max_length=100)
         self.q3 = TextInput(label="Question 3", placeholder="Optional question...", required=False, max_length=100)
@@ -518,13 +517,14 @@ class TicketSetupModal(Modal):
 
 class TicketSetupView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=60)
+        super().__init__(timeout=180)
         self.selected_category = None
 
     @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="1️⃣ Select Category...", channel_types=[discord.ChannelType.category], min_values=1, max_values=1)
     async def select_category(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        await interaction.response.defer()
         self.selected_category = select.values[0]
-        await interaction.response.edit_message(content=f"✅ Category selected: **{self.selected_category.name}**. Now select the Support Role below.")
+        await interaction.edit_original_response(content=f"✅ Category selected: **{self.selected_category.name}**. Now select the Support Role below.")
 
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="2️⃣ Select Support Role...", min_values=1, max_values=1)
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
