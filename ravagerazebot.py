@@ -224,28 +224,6 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
         print(f"Error in on_guild_channel_delete anti-nuke: {e}")
 
 
-ChatGPT said:
-Bilkul 👍 Main tumhare code ko properly fix karke de raha hoon. Is version mein:
-
-/setup_ticket proper slash command hai.
-Modal mein Discord ki 5-input limit follow ki hai.
-5 questions supported hain.
-Buttons dynamically add/remove kar sakte ho.
-Ticket close + transcript system hai.
-Interaction response handling safer hai.
-Ticket channel permissions properly set hain.
-Same user ke multiple tickets ko bhi handle karne ke liye unique channel name diya hai.
-Error handling add ki hai.
-Important: Ye code assume karta hai ki tumhare existing bot file mein discord.py, random, asyncio, os, aur datetime/timezone imports aur bot already defined hain.
-
-import discord
-from discord.ext import commands
-from discord import app_commands
-import asyncio
-import random
-import os
-from datetime import datetime, timezone
-
 
 # ==========================================================
 # TICKET SYSTEM CONFIG
