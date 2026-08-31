@@ -225,13 +225,12 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 
 
 # ==========================================================
-# ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (FINAL STABLE FIX)
+# ADVANCED FULLY CUSTOMIZABLE TICKET SYSTEM (COMMAND ARGS FIX)
 # ==========================================================
 
 ticket_configs = {}
 ticket_log_channel_id = None
 custom_ticket_ping = "{role} New ticket opened by {user}"
-temp_setup_cache = {}
 
 
 class DynamicTicketModal(Modal):
@@ -514,36 +513,16 @@ class TicketSetupModal(Modal):
         )
 
 
-# Step 2: Role Selection View (Directly opens Modal on selection)
-class TicketRoleSelectView(discord.ui.View):
-    def __init__(self, category):
-        super().__init__(timeout=180)
-        self.category = category
-
-    @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="2️⃣ Select Support Role...", min_values=1, max_values=1)
-    async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
-        selected_role = select.values[0]
-        # Yahan seedha modal bhej rahe hain bina kisi beech ke button ke, taaki interaction expire na ho
-        await interaction.response.send_modal(TicketSetupModal(self.category, selected_role))
-
-
-# Step 1: Category Selection View
-class TicketCategorySelectView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=180)
-
-    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="1️⃣ Select Ticket Category...", channel_types=[discord.ChannelType.category], min_values=1, max_values=1)
-    async def select_category(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
-        category = select.values[0]
-        view = TicketRoleSelectView(category)
-        await interaction.response.edit_message(content=f"✅ Category selected: **{category.name}**\nNow select the **Support Role** below:", view=view)
-
-
-@bot.hybrid_command(name="setup_ticket", description="Setup and deploy a ticket panel with management options.")
+@bot.hybrid_command(name="setup_ticket", description="Setup ticket system by providing category and support role.")
+@app_commands.describe(
+    category="The category where tickets will be created",
+    role="The support role that can view tickets"
+)
 @app_commands.checks.has_permissions(administrator=True)
-async def setup_ticket(ctx: commands.Context):
-    view = TicketCategorySelectView()
-    await ctx.send("📌 **Ticket Setup Wizard (Step 1):** Select the Category below.", view=view, ephemeral=True)
+async def setup_ticket(ctx: commands.Context, category: discord.CategoryChannel, role: discord.Role):
+    # Seedha command arguments se category aur role mil jayega, aur turant modal khul jayega!
+    modal = TicketSetupModal(category, role)
+    await ctx.interaction.response.send_modal(modal)
     
 # ==============================================================================
 # GIVEAWAY SYSTEM WITH FIXED / CUSTOM WINNER LOGIC
