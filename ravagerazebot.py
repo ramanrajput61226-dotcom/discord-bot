@@ -857,5 +857,3 @@ if BOT_TOKEN:
     bot.run(BOT_TOKEN)
 else:
     print("❌ Error: DISCORD_TOKEN environment variable not found!")
-
-
