@@ -21,7 +21,7 @@ OWNER_ID = 1255544682759323680
 ban_limit = 5
 channel_limit = 3
 spam_limit = 5
-custom_prefix = "!"
+custom_prefix = ","
 
 ticket_log_channel_id = None
 custom_ticket_ping = "{role}"
@@ -2299,6 +2299,100 @@ async def mute_cmd(
 
 
 @bot.hybrid_command(
+    name="removetimeout",
+    aliases=["rto"],
+    description="Remove a member's timeout."
+)
+@app_commands.describe(member="The member whose timeout you want to remove", reason="Reason for removing timeout")
+@permission_check("moderate_members")
+@app_permission_check("moderate_members")
+async def removetimeout_cmd(
+    ctx: commands.Context,
+    member: discord.Member,
+    reason: str = "No reason provided"
+):
+    guild = ctx.guild
+    hierarchy = _hierarchy_error(ctx, member)
+    if hierarchy:
+        await ctx.send(hierarchy)
+        return
+
+    if is_whitelisted(member, guild) and member.id != ctx.author.id:
+        await ctx.send(
+            "❌ **Access Denied:** User is whitelisted.",
+            ephemeral=True
+        )
+        return
+
+    if not member.is_timed_out():
+        await ctx.send(f"ℹ️ {member.mention} is not currently timed out.")
+        return
+
+    try:
+        await member.timeout(None, reason=reason)
+        await ctx.send(f"🔓 **Timeout removed successfully from {member.mention}!**")
+    except discord.Forbidden:
+        await ctx.send("❌ I don't have permission to remove this member's timeout.", ephemeral=True)
+    except Exception as e:
+        print(f"[REMOVE TIMEOUT ERROR] {e}")
+        await ctx.send("❌ Timeout remove karte waqt error aa gaya.", ephemeral=True)
+
+
+@bot.hybrid_command(
+    name="lock",
+    description="Lock the current channel for regular members."
+)
+@permission_check("manage_channels")
+@app_permission_check("manage_channels")
+async def lock_channel(ctx: commands.Context):
+    channel = ctx.channel
+    if not isinstance(channel, discord.TextChannel):
+        return await ctx.send("❌ This command can only be used in a text channel.", ephemeral=True)
+
+    try:
+        overwrite = channel.overwrites_for(ctx.guild.default_role)
+        overwrite.send_messages = False
+        await channel.set_permissions(
+            ctx.guild.default_role,
+            overwrite=overwrite,
+            reason=f"Channel locked by {ctx.author}"
+        )
+        await ctx.send("🔒 **Channel locked!** Regular members can no longer send messages here.")
+    except discord.Forbidden:
+        await ctx.send("❌ I need **Manage Channels** permission to lock this channel.", ephemeral=True)
+    except Exception as e:
+        print(f"[LOCK ERROR] {e}")
+        await ctx.send("❌ Channel lock karte waqt error aa gaya.", ephemeral=True)
+
+
+@bot.hybrid_command(
+    name="unlock",
+    description="Unlock the current channel for regular members."
+)
+@permission_check("manage_channels")
+@app_permission_check("manage_channels")
+async def unlock_channel(ctx: commands.Context):
+    channel = ctx.channel
+    if not isinstance(channel, discord.TextChannel):
+        return await ctx.send("❌ This command can only be used in a text channel.", ephemeral=True)
+
+    try:
+        overwrite = channel.overwrites_for(ctx.guild.default_role)
+        overwrite.send_messages = None
+        await channel.set_permissions(
+            ctx.guild.default_role,
+            overwrite=overwrite,
+            reason=f"Channel unlocked by {ctx.author}"
+        )
+        await ctx.send("🔓 **Channel unlocked!** Regular members can send messages again.")
+    except discord.Forbidden:
+        await ctx.send("❌ I need **Manage Channels** permission to unlock this channel.", ephemeral=True)
+    except Exception as e:
+        print(f"[UNLOCK ERROR] {e}")
+        await ctx.send("❌ Channel unlock karte waqt error aa gaya.", ephemeral=True)
+
+
+@bot.hybrid_command(
     name="purge",
     description="Bulk delete messages in current channel."
 )
@@ -2830,6 +2924,24 @@ async def help_mod(
     embed.add_field(
         name="/mute <member> <time> [reason]",
         value="Timeout member (e.g. 10m, 1h)",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/removetimeout <member> [reason]",
+        value="Remove a member's timeout. Prefix aliases: ,removetimeout / ,rto",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/lock",
+        value="Lock the current channel. Prefix: ,lock",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/unlock",
+        value="Unlock the current channel. Prefix: ,unlock",
         inline=False
     )
 
