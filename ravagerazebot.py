@@ -1969,8 +1969,8 @@ async def change_avatar(ctx, image: discord.Attachment = None, image_url: str = 
             import urllib.request
             with urllib.request.urlopen(image_url, timeout=15) as response:
                 data = response.read()
-        await bot.user.edit(avatar=data)
-        await ctx.send("✅ Bot avatar changed successfully. **Note:** the bot avatar is global, so the new avatar appears in every server where the bot is installed.")
+        await ctx.guild.me.edit(avatar=data)
+        await ctx.send("✅ Bot avatar changed successfully for **this server only**. Other servers will keep their existing bot avatar.")
     except discord.HTTPException as e:
         await ctx.send(f"❌ Discord rejected the avatar change: `{e}`", ephemeral=True)
     except Exception as e:
