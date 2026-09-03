@@ -864,8 +864,17 @@ class TicketSetupModal(discord.ui.Modal):
         self.panel_title = discord.ui.TextInput(label="Panel Title", default="Support Hub", max_length=100)
         self.panel_desc = discord.ui.TextInput(label="Panel Description", default="Click a button below to open a support ticket.", style=discord.TextStyle.paragraph, max_length=4000)
         self.btn_name = discord.ui.TextInput(label="First Button Name", default="Support", max_length=50)
-        self.questions = [discord.ui.TextInput(label=f"Question {i+1}", required=False, max_length=100) for i in range(4)]
-        for x in (self.panel_title, self.panel_desc, self.btn_name, *self.questions): self.add_item(x)
+        self.questions_input = discord.ui.TextInput(
+            label="Questions (one per line, max 4)",
+            placeholder="Question 1\nQuestion 2\nQuestion 3\nQuestion 4",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            max_length=400
+        )
+        # Discord modals allow a maximum of 5 text inputs.
+        # Keep all four optional questions in one multiline field.
+        for x in (self.panel_title, self.panel_desc, self.btn_name, self.questions_input):
+            self.add_item(x)
     async def on_submit(self, interaction):
         guild = interaction.guild
         if not guild: return await interaction.response.send_message("❌ This command can only be used in a server.", ephemeral=True)
@@ -874,13 +883,15 @@ class TicketSetupModal(discord.ui.Modal):
             pid = f"panel_{random.randint(100000, 999999)}"
             panel = new_ticket_panel(self.category, self.role, self.panel_title.value, self.panel_desc.value)
             first = next(iter(panel["buttons"]))
-            panel["buttons"][first] = {"label": self.btn_name.value, "questions": [q.value.strip() for q in self.questions if q.value.strip()]}
+            questions = [q.strip() for q in self.questions_input.value.splitlines() if q.strip()][:4]
+            panel["buttons"][first] = {"label": self.btn_name.value.strip(), "questions": questions}
             ticket_configs[guild.id] = {"active_panel": pid, "panels": {pid: panel}}
         else:
             pid = f"panel_{random.randint(100000, 999999)}"
             panel = new_ticket_panel(self.category, self.role, self.panel_title.value, self.panel_desc.value)
             first = next(iter(panel["buttons"]))
-            panel["buttons"][first] = {"label": self.btn_name.value, "questions": [q.value.strip() for q in self.questions if q.value.strip()]}
+            questions = [q.strip() for q in self.questions_input.value.splitlines() if q.strip()][:4]
+            panel["buttons"][first] = {"label": self.btn_name.value.strip(), "questions": questions}
             data["panels"][pid] = panel
             data["active_panel"] = pid
         save_persistent_settings()
@@ -2293,5 +2304,4 @@ else:
     print(
         "❌ Error: DISCORD_TOKEN environment variable not found!"
     )
-        "❌ Error: DISCORD_TOKEN environment variable not found!"
-    )
+
