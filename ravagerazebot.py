@@ -515,10 +515,42 @@ class DynamicTicketButton(discord.ui.Button):
         self.questions = questions
 
     async def callback(self, interaction):
-        if self.questions:
-            return await interaction.response.send_modal(DynamicTicketModal(self.panel_id, self.button_id, self.label, self.questions))
-        await interaction.response.defer(ephemeral=True)
-        await create_ticket(interaction, self.panel_id, self.button_id, self.label, [])
+        try:
+            if self.questions:
+                await interaction.response.send_modal(
+                    DynamicTicketModal(
+                        self.panel_id,
+                        self.button_id,
+                        self.label,
+                        self.questions
+                    )
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+            await create_ticket(
+                interaction,
+                self.panel_id,
+                self.button_id,
+                self.label,
+                []
+            )
+
+        except Exception as e:
+            print(f"[TICKET BUTTON ERROR] {e}")
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(
+                        "❌ Ticket open karte waqt error aa gaya. Please try again.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.response.send_message(
+                        "❌ Ticket open karte waqt error aa gaya. Please try again.",
+                        ephemeral=True
+                    )
+            except Exception as followup_error:
+                print(f"[TICKET BUTTON FOLLOWUP ERROR] {followup_error}")
 
 
 class DynamicTicketButtonView(discord.ui.View):
@@ -653,12 +685,57 @@ class TicketManagerView(ManagerBaseView):
 
     @discord.ui.button(label="Deploy Panel", style=discord.ButtonStyle.success, emoji="🚀")
     async def deploy(self, interaction, button):
-        panel = self.panel()
-        if not panel or not panel.get("buttons"):
-            return await interaction.response.send_message("❌ Add at least one button first.", ephemeral=True)
-        embed = discord.Embed(title=panel.get("title", "Support Hub"), description=panel.get("desc", ""), color=discord.Color(int(panel.get("ticket_color", 3447003))))
-        await interaction.channel.send(embed=embed, view=DynamicTicketButtonView(self.panel_id, panel["buttons"]))
-        await interaction.response.send_message("✅ Ticket panel deployed successfully.", ephemeral=True)
+        try:
+            panel = self.panel()
+            if not panel or not panel.get("buttons"):
+                return await interaction.response.send_message(
+                    "❌ Add at least one button first.",
+                    ephemeral=True
+                )
+
+            # Acknowledge the interaction BEFORE doing channel/network work.
+            # This prevents Discord's "Application did not respond" message.
+            await interaction.response.defer(ephemeral=True)
+
+            embed = discord.Embed(
+                title=panel.get("title", "Support Hub"),
+                description=panel.get("desc", ""),
+                color=discord.Color(int(panel.get("ticket_color", 3447003)))
+            )
+
+            await interaction.channel.send(
+                embed=embed,
+                view=DynamicTicketButtonView(
+                    self.panel_id,
+                    panel["buttons"]
+                )
+            )
+
+            await interaction.followup.send(
+                "✅ Ticket panel deployed successfully.",
+                ephemeral=True
+            )
+
+        except discord.Forbidden:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ Bot does not have permission to send messages in this channel.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Bot does not have permission to send messages in this channel.",
+                    ephemeral=True
+                )
+        except Exception as e:
+            print(f"[TICKET DEPLOY ERROR] {e}")
+            try:
+                await interaction.followup.send(
+                    "❌ Ticket panel deploy karte waqt error aa gaya.",
+                    ephemeral=True
+                )
+            except Exception:
+                pass
 
 
 class PanelSelectView(discord.ui.View):
@@ -836,6 +913,7 @@ async def add_ticket_button(ctx: commands.Context):
         return await ctx.send("❌ No ticket panels are configured. Run `/setup_ticket` first.", ephemeral=True)
     pid = ensure_ticket_structure(ctx.guild.id).get("active_panel")
     await ctx.send(embed=manager_embed(ctx.guild.id, pid), view=TicketManagerView(ctx.guild.id, pid), ephemeral=True)
+
 # =========================================================
 # GIVEAWAY
 # =========================================================
@@ -1946,6 +2024,36 @@ async def permissions(ctx, member: discord.Member = None):
     await ctx.send(embed=embed)
 
 
+@bot.hybrid_command(name="change_avatar", description="Change the bot's global avatar. Administrator only.")
+@app_commands.describe(image="Upload the new avatar image", image_url="Or provide a direct image URL")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def change_avatar(ctx, image: discord.Attachment = None, image_url: str = None):
+    if not ctx.guild:
+        return await ctx.send("❌ This command can only be used inside a server.", ephemeral=True)
+    if not (isinstance(ctx.author, discord.Member) and ctx.author.guild_permissions.administrator) and ctx.author.id != OWNER_ID:
+        return await ctx.send("❌ You need **Administrator** permission to use this command.", ephemeral=True)
+    if image is None and image_url is None and getattr(ctx, "message", None) and ctx.message.attachments:
+        image = ctx.message.attachments[0]
+    if image is None and not image_url:
+        return await ctx.send("❌ Upload an image or provide a direct image URL.", ephemeral=True)
+    try:
+        if image:
+            if image.content_type and not image.content_type.startswith("image/"):
+                return await ctx.send("❌ The uploaded file must be an image.", ephemeral=True)
+            data = await image.read()
+        else:
+            import urllib.request
+            with urllib.request.urlopen(image_url, timeout=15) as response:
+                data = response.read()
+        await ctx.guild.me.edit(avatar=data)
+        await ctx.send("✅ Bot avatar changed successfully for **this server only**. Other servers will keep their existing bot avatar.")
+    except discord.HTTPException as e:
+        await ctx.send(f"❌ Discord rejected the avatar change: `{e}`", ephemeral=True)
+    except Exception as e:
+        print(f"[AVATAR ERROR] {e}")
+        await ctx.send("❌ Failed to change the bot avatar. Make sure the image is valid and within Discord's limits.", ephemeral=True)
+
 
 # =========================================================
 # HELP COMMANDS
@@ -2213,5 +2321,7 @@ if BOT_TOKEN:
     bot.run(BOT_TOKEN)
 else:
     print(
+        "❌ Error: DISCORD_TOKEN environment variable not found!"
+    )
         "❌ Error: DISCORD_TOKEN environment variable not found!"
     )
