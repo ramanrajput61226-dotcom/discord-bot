@@ -2024,36 +2024,6 @@ async def permissions(ctx, member: discord.Member = None):
     await ctx.send(embed=embed)
 
 
-@bot.hybrid_command(name="change_avatar", description="Change the bot's global avatar. Administrator only.")
-@app_commands.describe(image="Upload the new avatar image", image_url="Or provide a direct image URL")
-@permission_check("administrator")
-@app_permission_check("administrator")
-async def change_avatar(ctx, image: discord.Attachment = None, image_url: str = None):
-    if not ctx.guild:
-        return await ctx.send("❌ This command can only be used inside a server.", ephemeral=True)
-    if not (isinstance(ctx.author, discord.Member) and ctx.author.guild_permissions.administrator) and ctx.author.id != OWNER_ID:
-        return await ctx.send("❌ You need **Administrator** permission to use this command.", ephemeral=True)
-    if image is None and image_url is None and getattr(ctx, "message", None) and ctx.message.attachments:
-        image = ctx.message.attachments[0]
-    if image is None and not image_url:
-        return await ctx.send("❌ Upload an image or provide a direct image URL.", ephemeral=True)
-    try:
-        if image:
-            if image.content_type and not image.content_type.startswith("image/"):
-                return await ctx.send("❌ The uploaded file must be an image.", ephemeral=True)
-            data = await image.read()
-        else:
-            import urllib.request
-            with urllib.request.urlopen(image_url, timeout=15) as response:
-                data = response.read()
-        await ctx.guild.me.edit(avatar=data)
-        await ctx.send("✅ Bot avatar changed successfully for **this server only**. Other servers will keep their existing bot avatar.")
-    except discord.HTTPException as e:
-        await ctx.send(f"❌ Discord rejected the avatar change: `{e}`", ephemeral=True)
-    except Exception as e:
-        print(f"[AVATAR ERROR] {e}")
-        await ctx.send("❌ Failed to change the bot avatar. Make sure the image is valid and within Discord's limits.", ephemeral=True)
-
 
 # =========================================================
 # HELP COMMANDS
