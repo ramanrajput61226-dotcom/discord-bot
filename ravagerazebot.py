@@ -542,7 +542,9 @@ class CloseTicketModal(discord.ui.Modal, title="Close Ticket"):
     reason = discord.ui.TextInput(label="Closing Reason", placeholder="Why is this ticket being closed?", style=discord.TextStyle.paragraph, required=True, max_length=1000)
 
     async def on_submit(self, interaction):
-        await interaction.response.send_message("🔒 Ticket is being closed. The transcript will be sent by DM if possible.", ephemeral=True)
+        # FIX APPLIED HERE: Defer first to prevent 3-second interaction timeout error
+        await interaction.response.defer(ephemeral=True)
+        
         channel = interaction.channel
         guild = interaction.guild
         closer = interaction.user
@@ -584,6 +586,13 @@ class CloseTicketModal(discord.ui.Modal, title="Close Ticket"):
         except Exception:
             pass
         await asyncio.sleep(3)
+        
+        # FIX APPLIED HERE: Use followup.send since interaction was deferred
+        try:
+            await interaction.followup.send("🔒 Ticket is being closed. The transcript will be sent by DM if possible.", ephemeral=True)
+        except Exception:
+            pass
+
         try:
             await channel.delete(reason=f"Ticket closed by {closer}: {close_reason}")
         except Exception as e:
@@ -836,7 +845,6 @@ async def add_ticket_button(ctx: commands.Context):
         return await ctx.send("❌ No ticket panels are configured. Run `/setup_ticket` first.", ephemeral=True)
     pid = ensure_ticket_structure(ctx.guild.id).get("active_panel")
     await ctx.send(embed=manager_embed(ctx.guild.id, pid), view=TicketManagerView(ctx.guild.id, pid), ephemeral=True)
-
 # =========================================================
 # GIVEAWAY
 # =========================================================
