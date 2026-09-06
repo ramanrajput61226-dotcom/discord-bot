@@ -2297,7 +2297,6 @@ async def help_mod(
 keep_alive()
 
 BOT_TOKEN = os.getenv("DISCORD_TOKEN")
-print(f"DEBUG TOKEN: {BOT_TOKEN}")
 
 if BOT_TOKEN:
     bot.run(BOT_TOKEN)
