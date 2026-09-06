@@ -10,10 +10,10 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ui import Modal, TextInput
 
-from keep_alive import keep_alive
+try:
+    from keep_alive import keep_alive
 except ImportError:
-def keep_alive():
-pass
+    pass
 
 OWNER_ID = 1255544682759323680
 
