@@ -10,7 +10,6 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ui import Modal, TextInput
 
-try:
 from keep_alive 
 import keep_alive
 except ImportError:
