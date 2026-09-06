@@ -30,12 +30,14 @@ PREFIX_DEFAULT = ","
 # The random-winner giveaway remains hybrid (prefix + slash), while fixed-winner
 # giveaways remain prefix-only.
 
-# These are the three live Discord messages supplied for migration/recovery.
-# The bot will inspect them on startup. Giveaway messages are recovered from
-# their embed timestamp/footer + current reaction participants.
-RECOVERY_MESSAGES = [
+# Existing live Discord messages supplied for recovery.
+GIVEAWAY_RECOVERY_MESSAGES = [
     (1543323334756794399, 1545318942120222770, 1545319711821275157),
+]
+
+TICKET_RECOVERY_MESSAGES = [
     (1543323334756794399, 1543323335713099885, 1545316530278109237),
+    (1543323334756794399, 1545311264945995806, 1545318359607021679),
     (1288817064026570752, 1509386176388399184, 1545798013128015990),
 ]
 
@@ -533,6 +535,98 @@ class TicketPanelView(discord.ui.View):
         super().__init__(timeout=None)
         for bid,label,qs in panel_buttons(panel_id)[:25]: self.add_item(TicketButton(panel_id,bid,label,qs))
 
+class RecoveredTicketButton(discord.ui.Button):
+    def __init__(self, custom_id, panel_id, button_id, label, questions):
+        super().__init__(label=(label or "Open Ticket")[:80], style=discord.ButtonStyle.primary, custom_id=custom_id)
+        self.panel_id = panel_id
+        self.button_id = button_id
+        self.questions = questions or []
+
+    async def callback(self, interaction):
+        if self.questions:
+            return await interaction.response.send_modal(
+                TicketOpenModal(self.panel_id, self.button_id, self.label, self.questions)
+            )
+        await interaction.response.defer(ephemeral=True)
+        await open_ticket(interaction, self.panel_id, self.button_id, self.label, [])
+
+class RecoveredTicketPanelView(discord.ui.View):
+    def __init__(self, panel_id, components):
+        super().__init__(timeout=None)
+        for item in components:
+            custom_id = item.get("custom_id")
+            if not custom_id:
+                continue
+            bid = item.get("button_id")
+            label = item.get("label") or "Open Ticket"
+            questions = item.get("questions") or []
+            self.add_item(RecoveredTicketButton(custom_id, panel_id, bid, label, questions))
+
+async def recover_ticket_panel(guild_id, channel_id, message_id):
+    """Reconnect an already-existing Discord ticket panel without deleting/reposting it."""
+    guild = bot.get_guild(guild_id)
+    channel = guild.get_channel(channel_id) if guild else None
+    if not channel:
+        log.warning("Ticket recovery: channel %s not found for guild %s", channel_id, guild_id)
+        return
+    try:
+        msg = await channel.fetch_message(message_id)
+    except Exception as e:
+        log.warning("Ticket recovery: could not fetch %s: %s", message_id, e)
+        return
+
+    # Prefer an exact saved panel, then match an existing panel by button labels.
+    panel = db.fetchone("SELECT * FROM ticket_panels WHERE guild_id=? AND message_id=?", (guild_id, message_id))
+    components = []
+    for row in getattr(msg, "components", []) or []:
+        for child in getattr(row, "children", []) or []:
+            if isinstance(child, discord.ui.Button) and child.custom_id:
+                components.append({"custom_id": child.custom_id, "label": child.label})
+
+    if not components:
+        log.warning("Ticket recovery: message %s has no recoverable buttons", message_id)
+        return
+
+    if not panel:
+        all_panels = db.fetchall("SELECT * FROM ticket_panels WHERE guild_id=? ORDER BY active DESC, rowid DESC", (guild_id,))
+        labels = {str(x["label"] or "").strip().lower() for x in components}
+        best = None; best_score = -1
+        for candidate in all_panels:
+            c_labels = {str(x[1] or "").strip().lower() for x in panel_buttons(candidate["panel_id"])}
+            score = len(labels & c_labels)
+            if score > best_score:
+                best, best_score = candidate, score
+        panel = best if best_score > 0 else (all_panels[0] if all_panels else None)
+
+    if not panel:
+        # Last-resort recovery: create a DB record from the existing message itself.
+        pid = f"recovered_ticket_{message_id}"
+        emb = msg.embeds[0] if msg.embeds else None
+        title = (emb.title if emb else None) or "Support Hub"
+        description = (emb.description if emb else None) or "Click a button below to open a support ticket."
+        db.execute("INSERT OR IGNORE INTO ticket_panels(panel_id,guild_id,category_id,role_id,title,description,ticket_title,ticket_description,opening_message,footer,color,message_id,channel_id,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
+                   (pid,guild_id,None,None,title,description,"🎫 {type} Ticket","Ticket opened by {user}","{role} New ticket opened by {user}","Opened by {user}",3447003,message_id,channel_id))
+        panel = db.fetchone("SELECT * FROM ticket_panels WHERE panel_id=?", (pid,))
+
+    # Store the live message location on the matched panel.
+    db.execute("UPDATE ticket_panels SET message_id=?, channel_id=?, active=1 WHERE panel_id=?", (message_id, channel_id, panel["panel_id"]))
+
+    saved = {str(label).strip().lower(): (bid, qs) for bid, label, qs in panel_buttons(panel["panel_id"])}
+    recovered_items = []
+    for item in components[:25]:
+        key = str(item["label"] or "").strip().lower()
+        bid, questions = saved.get(key, (f"recovered_{message_id}_{len(recovered_items)}", []))
+        if not any(r[0] == bid for r in panel_buttons(panel["panel_id"])):
+            db.execute("INSERT OR IGNORE INTO ticket_buttons(button_id,panel_id,label,questions) VALUES(?,?,?,?)",
+                       (bid, panel["panel_id"], item["label"] or "Open Ticket", json.dumps(questions[:4])))
+        recovered_items.append({"custom_id": item["custom_id"], "button_id": bid, "label": item["label"], "questions": questions})
+
+    try:
+        bot.add_view(RecoveredTicketPanelView(panel["panel_id"], recovered_items), message_id=message_id)
+        log.info("Recovered existing ticket panel: guild=%s channel=%s message=%s panel=%s", guild_id, channel_id, message_id, panel["panel_id"])
+    except Exception as e:
+        log.warning("Ticket view recovery failed for %s: %s", message_id, e)
+
 async def open_ticket(interaction,panel_id,button_id,label,answers):
     guild=interaction.guild; user=interaction.user; panel=panel_row(guild.id,panel_id)
     if not panel: return await interaction.followup.send("❌ Ticket panel no longer exists.",ephemeral=True)
@@ -980,9 +1074,14 @@ async def on_ready():
         bot.add_view(TicketControlView()); bot.add_view(VerifyView()); loaded_views.add("global")
     for p in db.fetchall("SELECT panel_id,message_id FROM ticket_panels WHERE active=1"):
         try:
-            view=TicketPanelView(p["panel_id"]); bot.add_view(view,message_id=p["message_id"] if p["message_id"] else None)
+            if p["message_id"]:
+                view=TicketPanelView(p["panel_id"]); bot.add_view(view,message_id=p["message_id"])
         except Exception as e: log.warning("view restore failed for %s: %s",p["panel_id"],e)
-    for gid,cid,mid in RECOVERY_MESSAGES: await recover_giveaway_message(gid,cid,mid)
+    # Reconnect the three old ticket-panel messages supplied by the owner.
+    for gid,cid,mid in TICKET_RECOVERY_MESSAGES:
+        await recover_ticket_panel(gid,cid,mid)
+    for gid,cid,mid in GIVEAWAY_RECOVERY_MESSAGES:
+        await recover_giveaway_message(gid,cid,mid)
     if not giveaway_worker.is_running(): giveaway_worker.start()
     try:
         synced=await bot.tree.sync(); log.info("Synced %s slash commands",len(synced))
@@ -1720,4 +1819,3 @@ if app_command_count > 100:
 log.info("Slash command budget: %d/100 global commands registered", app_command_count)
 
 bot.run(TOKEN)
-
