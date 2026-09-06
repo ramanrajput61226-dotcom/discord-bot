@@ -1126,6 +1126,7 @@ keep_alive()
 TOKEN=os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN environment variable not found!")
-bot.run(TOKEN)
+BOT_TOKEN = os.getenv("DISCORD_TOKEN")
+bot.run(BOT_TOKEN)
 
 
