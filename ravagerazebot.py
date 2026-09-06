@@ -27,6 +27,9 @@ DB_FILE = os.getenv("BOT_DB", "bot_data.sqlite3")
 LEGACY_CONFIG = "bot_settings.json"
 PREFIX_DEFAULT = ","
 
+# The random-winner giveaway remains hybrid (prefix + slash), while fixed-winner
+# giveaways remain prefix-only.
+
 # These are the three live Discord messages supplied for migration/recovery.
 # The bot will inspect them on startup. Giveaway messages are recovered from
 # their embed timestamp/footer + current reaction participants.
@@ -214,12 +217,6 @@ class Database:
             user_id INTEGER NOT NULL,
             reason TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            PRIMARY KEY(guild_id,user_id)
-        );
-        CREATE TABLE IF NOT EXISTS voice_stats (
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            seconds INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY(guild_id,user_id)
         );
         CREATE TABLE IF NOT EXISTS polls (
@@ -783,44 +780,10 @@ async def nick(ctx,member:discord.Member,nickname:str=None):
     if err: return await ctx.send(err,ephemeral=True)
     old=member.display_name; await member.edit(nick=nickname,reason=f"Nickname changed by {ctx.author}"); await ctx.send(f"✅ Nickname changed: `{old}` → `{nickname or member.name}`")
 
-@bot.hybrid_command(name="deafen",description="Server-deafen a member")
-@app_command_check("deafen_members")
-@command_check("deafen_members")
-async def deafen(ctx,member:discord.Member): await apply_mod(ctx,member,"deafen","Manual deafen",lambda:member.edit(deafen=True))
-
-@bot.hybrid_command(name="undeafen",description="Remove server deafen")
-@app_command_check("deafen_members")
-@command_check("deafen_members")
-async def undeafen(ctx,member:discord.Member): await apply_mod(ctx,member,"undeafen","Manual undeafen",lambda:member.edit(deafen=False))
-
-@bot.hybrid_command(name="voicemute",description="Server-mute a member")
-@app_command_check("mute_members")
-@command_check("mute_members")
-async def voicemute(ctx,member:discord.Member): await apply_mod(ctx,member,"voicemute","Manual voice mute",lambda:member.edit(mute=True))
-
-@bot.hybrid_command(name="voiceunmute",description="Remove server voice mute")
-@app_command_check("mute_members")
-@command_check("mute_members")
-async def voiceunmute(ctx,member:discord.Member): await apply_mod(ctx,member,"voiceunmute","Manual voice unmute",lambda:member.edit(mute=False))
-
-@bot.hybrid_command(name="move",description="Move a member to a voice channel")
-@app_command_check("move_members")
-@command_check("move_members")
-async def move(ctx,member:discord.Member,channel:discord.VoiceChannel):
-    if not member.voice: return await ctx.send("❌ Member is not in voice.",ephemeral=True)
-    await member.move_to(channel,reason=f"Moved by {ctx.author}"); await ctx.send(f"✅ Moved {member.mention} to {channel.mention}.")
-
-# ============================================================
-# MESSAGE COUNT / INVITES
-# ============================================================
-def increment_message(guild_id,user_id):
-    now=utcnow(); db.execute("""INSERT INTO message_stats(guild_id,user_id,total,daily,weekly,monthly,last_message) VALUES(?,?,?,?,?,?,?)
-        ON CONFLICT(guild_id,user_id) DO UPDATE SET total=total+1,daily=daily+1,weekly=weekly+1,monthly=monthly+1,last_message=excluded.last_message""",(guild_id,user_id,1,1,1,1,iso(now)))
-
 @bot.hybrid_command(name="mystats",description="Show your message/invite/voice stats")
 async def mystats(ctx):
-    ms=db.fetchone("SELECT * FROM message_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,ctx.author.id)); inv=db.fetchone("SELECT * FROM invite_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,ctx.author.id)); voice=db.fetchone("SELECT seconds FROM voice_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,ctx.author.id))
-    e=discord.Embed(title=f"📊 Stats — {ctx.author.display_name}",color=discord.Color.blurple()); e.add_field(name="Messages",value=f"All-time: `{ms['total'] if ms else 0}`\nDaily: `{ms['daily'] if ms else 0}`\nWeekly: `{ms['weekly'] if ms else 0}`\nMonthly: `{ms['monthly'] if ms else 0}`",inline=False); e.add_field(name="Invites",value=f"Total: `{inv['total'] if inv else 0}`\nValid: `{inv['valid'] if inv else 0}`\nLeft: `{inv['left_count'] if inv else 0}`\nRejoins: `{inv['rejoins'] if inv else 0}`",inline=False); e.add_field(name="Voice",value=f"`{int((voice['seconds'] if voice else 0)/60)}` minutes",inline=False); await ctx.send(embed=e)
+    ms=db.fetchone("SELECT * FROM message_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,ctx.author.id)); inv=db.fetchone("SELECT * FROM invite_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,ctx.author.id));
+    e=discord.Embed(title=f"📊 Stats — {ctx.author.display_name}",color=discord.Color.blurple()); e.add_field(name="Messages",value=f"All-time: `{ms['total'] if ms else 0}`\nDaily: `{ms['daily'] if ms else 0}`\nWeekly: `{ms['weekly'] if ms else 0}`\nMonthly: `{ms['monthly'] if ms else 0}`",inline=False); e.add_field(name="Invites",value=f"Total: `{inv['total'] if inv else 0}`\nValid: `{inv['valid'] if inv else 0}`\nLeft: `{inv['left_count'] if inv else 0}`\nRejoins: `{inv['rejoins'] if inv else 0}`",inline=False); await ctx.send(embed=e)
 
 @bot.hybrid_command(name="stats",description="Show another member's stats")
 async def stats(ctx,member:discord.Member=None):
@@ -829,9 +792,9 @@ async def stats(ctx,member:discord.Member=None):
     ms=db.fetchone("SELECT * FROM message_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,member.id)); inv=db.fetchone("SELECT * FROM invite_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,member.id));
     e=discord.Embed(title=f"📊 Stats — {member.display_name}",color=member.color if member.color.value else discord.Color.blurple()); e.set_thumbnail(url=member.display_avatar.url); e.add_field(name="Messages",value=f"All-time: `{ms['total'] if ms else 0}`\nDaily: `{ms['daily'] if ms else 0}`\nWeekly: `{ms['weekly'] if ms else 0}`\nMonthly: `{ms['monthly'] if ms else 0}`",inline=False); e.add_field(name="Invites",value=f"Total: `{inv['total'] if inv else 0}`\nValid: `{inv['valid'] if inv else 0}`\nFake: `{inv['fake'] if inv else 0}`\nLeft: `{inv['left_count'] if inv else 0}`\nRejoins: `{inv['rejoins'] if inv else 0}`",inline=False); await ctx.send(embed=e)
 
-@bot.hybrid_command(name="leaderboard",description="Show message, invite or voice leaderboard")
-@app_commands.describe(category="messages, invites or voice")
-async def leaderboard(ctx,category:Literal["messages","invites","voice"]="messages"):
+@bot.hybrid_command(name="leaderboard",description="Show message or invite leaderboard")
+@app_commands.describe(category="messages or invites")
+async def leaderboard(ctx,category:Literal["messages","invites"]="messages"):
     if category=="messages": rows=db.fetchall("SELECT user_id,total FROM message_stats WHERE guild_id=? ORDER BY total DESC LIMIT 10",(ctx.guild.id,)); text="\n".join(f"**{i}.** <@{r['user_id']}> — `{r['total']}` messages" for i,r in enumerate(rows,1))
     elif category=="invites": rows=db.fetchall("SELECT user_id,valid,total,left_count FROM invite_stats WHERE guild_id=? ORDER BY valid DESC,total DESC LIMIT 10",(ctx.guild.id,)); text="\n".join(f"**{i}.** <@{r['user_id']}> — `{r['valid']}` valid / `{r['total']}` total / `{r['left_count']}` left" for i,r in enumerate(rows,1))
     else: rows=db.fetchall("SELECT user_id,seconds FROM voice_stats WHERE guild_id=? ORDER BY seconds DESC LIMIT 10",(ctx.guild.id,)); text="\n".join(f"**{i}.** <@{r['user_id']}> — `{int(r['seconds']/60)}` minutes" for i,r in enumerate(rows,1))
@@ -1165,16 +1128,6 @@ async def on_member_remove(member):
             try: await ch.send(safe_format(gcfg["goodbye_message"] or "Goodbye {username}!",member,member.guild))
             except Exception: pass
     await server_log(member.guild,"📤 Member Left",f"**Member:** {member} (`{member.id}`)",discord.Color.red())
-
-@bot.event
-async def on_voice_state_update(member,before,after):
-    if before.channel is None and after.channel is not None: voice_join_times[(member.guild.id,member.id)]=utcnow()
-    elif before.channel is not None and after.channel is None:
-        started=voice_join_times.pop((member.guild.id,member.id),None)
-        if started:
-            seconds=max(0,int((utcnow()-started).total_seconds())); db.execute("INSERT INTO voice_stats(guild_id,user_id,seconds) VALUES(?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET seconds=seconds+excluded.seconds",(member.guild.id,member.id,seconds))
-    if before.channel != after.channel:
-        await server_log(member.guild,"🎙️ Voice Update",f"**Member:** {member.mention}\n**From:** {before.channel.mention if before.channel else 'None'}\n**To:** {after.channel.mention if after.channel else 'None'}")
 
 # Basic audit-style event logs
 @bot.event
@@ -1522,7 +1475,7 @@ async def reminder_worker():
 @reminder_worker.before_loop
 async def before_reminder_worker(): await bot.wait_until_ready()
 
-@bot.hybrid_command(name="rolecreate",description="Create a role")
+@bot.command(name="rolecreate",description="Create a role")
 @command_check("manage_roles")
 @app_command_check("manage_roles")
 async def rolecreate(ctx,name:str,color:str="0x5865F2"):
@@ -1530,14 +1483,14 @@ async def rolecreate(ctx,name:str,color:str="0x5865F2"):
     except Exception: c=discord.Color.blurple()
     r=await ctx.guild.create_role(name=name,color=c,reason=f"Created by {ctx.author}"); await ctx.send(f"✅ Created {r.mention}.")
 
-@bot.hybrid_command(name="roledelete",description="Delete a role")
+@bot.command(name="roledelete",description="Delete a role")
 @command_check("manage_roles")
 @app_command_check("manage_roles")
 async def roledelete(ctx,role:discord.Role):
     if ctx.guild.me and role>=ctx.guild.me.top_role: return await ctx.send("❌ I cannot delete that role.")
     await role.delete(reason=f"Deleted by {ctx.author}"); await ctx.send("✅ Role deleted.")
 
-@bot.hybrid_command(name="rolecolor",description="Change role color")
+@bot.command(name="rolecolor",description="Change role color")
 @command_check("manage_roles")
 @app_command_check("manage_roles")
 async def rolecolor(ctx,role:discord.Role,color:str):
@@ -1545,7 +1498,7 @@ async def rolecolor(ctx,role:discord.Role,color:str):
     except Exception: return await ctx.send("❌ Use a hex color like #ff0000.")
     await role.edit(color=c,reason=f"Changed by {ctx.author}"); await ctx.send("✅ Role color updated.")
 
-@bot.hybrid_command(name="rolelist",description="List server roles")
+@bot.command(name="rolelist",description="List server roles")
 async def rolelist(ctx):
     roles=[r for r in reversed(ctx.guild.roles) if r.name!="@everyone"]
     await ctx.send(embed=discord.Embed(title="🎭 Server Roles",description="\n".join(f"{r.mention} — {len(r.members)} members" for r in roles[:50]) or "No roles.",color=discord.Color.blurple()))
@@ -1633,7 +1586,7 @@ async def invite_sync(ctx):
 
 @bot.hybrid_command(name="userstats",description="Show detailed member stats")
 async def userstats(ctx,member:discord.Member=None):
-    m=member or ctx.author; ms=db.fetchone("SELECT * FROM message_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,m.id)); iv=db.fetchone("SELECT * FROM invite_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,m.id)); ve=db.fetchone("SELECT seconds FROM voice_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,m.id));
+    m=member or ctx.author; ms=db.fetchone("SELECT * FROM message_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,m.id)); iv=db.fetchone("SELECT * FROM invite_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,m.id));
     desc=f"Messages: **{ms['total'] if ms else 0}**\nXP: **{ms['xp'] if ms else 0}** • Level: **{ms['level'] if ms else 0}**\nInvites: **{iv['valid'] if iv else 0}** valid • **{iv['fake'] if iv else 0}** fake • **{iv['left_count'] if iv else 0}** left • **{iv['rejoins'] if iv else 0}** rejoins\nVoice: **{int((ve['seconds'] if ve else 0)/60)} min**"; await ctx.send(embed=discord.Embed(title=f"📊 {m.display_name} Stats",description=desc,color=discord.Color.blurple()))
 
 @bot.tree.command(name="server_roles",description="Show server role statistics")
@@ -1747,7 +1700,7 @@ async def unafk(ctx):
 # ============================================================
 @bot.hybrid_command(name="help",description="Show main bot categories")
 async def help_cmd(ctx):
-    e=discord.Embed(title="🤖 All-Rounder Bot",description="Moderation • AutoMod • Logging • Tickets • Giveaways • Invites • Stats • Welcome • Voice • Suggestions • Polls • AFK • Verification • Reaction Roles • Raid Protection • Custom Commands • Server tools",color=discord.Color.blurple()); e.add_field(name="🛡️ Moderation",value="`ban` `kick` `softban` `unban` `warn` `warnings` `clearwarnings` `history` `mute` `unmute` `nick` `deafen` `undeafen` `voicemute` `voiceunmute` `move`",inline=False); e.add_field(name="📊 Stats",value="`mystats` `stats` `leaderboard` `invites` `inviteleaderboard`",inline=False); e.add_field(name="🎫 Tickets",value="`/setup_ticket` `/deploy_ticket` + persistent panels",inline=False); e.add_field(name="🎉 Giveaways",value="`giveaway` `/giveaway_end` `/giveaway_reroll` + restart recovery",inline=False); e.add_field(name="⚙️ Server",value="`/serverconfig` `/setlog` `/setmodlog` `/setwelcome` `/setautorole` `/setautomod` `lockdown` `unlockdown`",inline=False); await ctx.send(embed=e)
+    e=discord.Embed(title="🤖 All-Rounder Bot",description="Moderation • AutoMod • Logging • Tickets • Giveaways • Invites • Stats • Welcome • Suggestions • Polls • AFK • Verification • Reaction Roles • Raid Protection • Custom Commands • Server tools",color=discord.Color.blurple()); e.add_field(name="🛡️ Moderation",value="`ban` `kick` `softban` `unban` `warn` `warnings` `clearwarnings` `history` `mute` `unmute` `nick` ",inline=False); e.add_field(name="📊 Stats",value="`mystats` `stats` `leaderboard` `invites` `inviteleaderboard`",inline=False); e.add_field(name="🎫 Tickets",value="`/setup_ticket` `/deploy_ticket` + persistent panels",inline=False); e.add_field(name="🎉 Giveaways",value="`giveaway` `/giveaway_end` `/giveaway_reroll` + restart recovery",inline=False); e.add_field(name="⚙️ Server",value="`/serverconfig` `/setlog` `/setmodlog` `/setwelcome` `/setautorole` `/setautomod` `lockdown` `unlockdown`",inline=False); await ctx.send(embed=e)
 
 @bot.event
 async def on_command_error(ctx,error):
@@ -1761,6 +1714,10 @@ keep_alive()
 TOKEN=os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN environment variable not found!")
-bot.run(TOKEN)
+app_command_count = len(bot.tree.get_commands())
+if app_command_count > 100:
+    raise RuntimeError(f"Application command count is {app_command_count}; Discord allows 100 global slash commands.")
+log.info("Slash command budget: %d/100 global commands registered", app_command_count)
 
+bot.run(TOKEN)
 
