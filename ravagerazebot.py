@@ -1279,7 +1279,7 @@ async def giveawayfixed_cmd(ctx, duration: str, member: discord.Member, winners_
     seconds = parse_time(duration)
     embed = discord.Embed(
         title="🎉 GIVEAWAY TIME! 🎉",
-        description=f"**Prize:** {prize}\n**Winner(s):** `{winners_count}`\n**Guaranteed Winner:** {member.mention}\n**Hosted by:** {ctx.author.mention}\n\nReact with 🎉 to enter!",
+        description=f"**Prize:** {prize}\n**Winner(s):** `{winners_count}`\n**Hosted by:** {ctx.author.mention}\n\nReact with 🎉 to enter!",
         color=discord.Color.gold(), timestamp=datetime.now(timezone.utc))
     embed.set_footer(text=f"Ends in {duration} • Fixed winner")
     msg = await ctx.send(embed=embed)
@@ -1305,7 +1305,7 @@ async def giveawayfixed_cmd(ctx, duration: str, member: discord.Member, winners_
                (json.dumps(participants), json.dumps([w.id for w in winners]), datetime.now(timezone.utc).isoformat(), msg.id)); DB.commit()
     if winners:
         mentions=", ".join(w.mention for w in winners)
-        await msg.edit(embed=discord.Embed(title="🎉 GIVEAWAY ENDED 🎉",description=f"**Prize:** {prize}\n**Winner(s):** {mentions} 🏆\n**Guaranteed Winner:** {member.mention}",color=discord.Color.green()),view=None)
+        await msg.edit(embed=discord.Embed(title="🎉 GIVEAWAY ENDED 🎉",description=f"**Prize:** {prize}\n**Winner(s):** {mentions} 🏆\n**Winner:** {member.mention}",color=discord.Color.green()),view=None)
         await ctx.send(f"🎊 Congratulations {mentions}! You won **{prize}**!")
     else:
         await msg.edit(embed=discord.Embed(title="🎉 GIVEAWAY ENDED 🎉",description=f"**Prize:** {prize}\n❌ No valid participants found.",color=discord.Color.red()),view=None)
