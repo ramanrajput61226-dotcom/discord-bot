@@ -1281,7 +1281,7 @@ async def giveawayfixed_cmd(ctx, duration: str, member: discord.Member, winners_
         title="🎉 GIVEAWAY TIME! 🎉",
         description=f"**Prize:** {prize}\n**Winner(s):** `{winners_count}`\n**Hosted by:** {ctx.author.mention}\n\nReact with 🎉 to enter!",
         color=discord.Color.gold(), timestamp=datetime.now(timezone.utc))
-    embed.set_footer(text=f"Ends in {duration} • Fixed winner")
+    embed.set_footer(text=f"Ends in {duration} . Winner Count {winners_count} ")
     msg = await ctx.send(embed=embed)
     await msg.add_reaction("🎉")
     DB.execute("INSERT OR REPLACE INTO giveaways(message_id,guild_id,channel_id,prize,winners_count,host_id,fixed_winner_id,created_at) VALUES (?,?,?,?,?,?,?,?)",
