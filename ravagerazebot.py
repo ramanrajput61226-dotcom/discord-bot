@@ -141,6 +141,12 @@ for _sql in (
     "ALTER TABLE guild_settings ADD COLUMN welcome_message TEXT",
     "ALTER TABLE guild_settings ADD COLUMN welcome_image TEXT",
     "ALTER TABLE guild_settings ADD COLUMN invite_log_channel_id INTEGER",
+    "ALTER TABLE guild_settings ADD COLUMN member_log_channel_id INTEGER",
+    "ALTER TABLE guild_settings ADD COLUMN message_log_channel_id INTEGER",
+    "ALTER TABLE guild_settings ADD COLUMN voice_log_channel_id INTEGER",
+    "ALTER TABLE guild_settings ADD COLUMN automod_log_channel_id INTEGER",
+    "ALTER TABLE guild_settings ADD COLUMN channel_log_channel_id INTEGER",
+    "ALTER TABLE guild_settings ADD COLUMN role_log_channel_id INTEGER",
     "ALTER TABLE guild_settings ADD COLUMN automod_spam INTEGER DEFAULT 0",
     "ALTER TABLE guild_settings ADD COLUMN automod_duplicate INTEGER DEFAULT 0",
     "ALTER TABLE guild_settings ADD COLUMN automod_invites INTEGER DEFAULT 0",
@@ -154,6 +160,95 @@ for _sql in (
         DB.execute(_sql); DB.commit()
     except sqlite3.OperationalError:
         pass
+
+
+# =========================================================
+# SAFE LEGACY BACKUP RESTORE / MIGRATION
+# =========================================================
+# Embedded from the user's supplied backup. Existing live data is NEVER
+# overwritten. Missing rows/settings are restored from the legacy backup.
+_LEGACY_BACKUP_B64 = """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"""
+
+
+def _safe_restore_legacy_backup():
+    import base64
+    import tempfile
+    import zipfile
+    from pathlib import Path
+
+    try:
+        raw = base64.b64decode(_LEGACY_BACKUP_B64)
+        with tempfile.TemporaryDirectory() as td:
+            zpath = Path(td) / "legacy.zip"
+            zpath.write_bytes(raw)
+            with zipfile.ZipFile(zpath, "r") as z:
+                names = z.namelist()
+                db_name = next((n for n in names if n.endswith(".sqlite3")), None)
+                cfg_name = next((n for n in names if n.endswith("bot_settings.json")), None)
+                if not db_name:
+                    print("[RESTORE] No SQLite database found in embedded backup.")
+                    return
+                legacy_db = Path(td) / "legacy.sqlite3"
+                with z.open(db_name) as src, legacy_db.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+
+                old = sqlite3.connect(str(legacy_db))
+                old.row_factory = sqlite3.Row
+                old_tables = [r[0] for r in old.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                ).fetchall()]
+
+                restored_rows = 0
+                for table in old_tables:
+                    try:
+                        src_cols = [r[1] for r in old.execute(f"PRAGMA table_info(\"{table}\")").fetchall()]
+                        dst_cols = [r[1] for r in DB.execute(f"PRAGMA table_info(\"{table}\")").fetchall()]
+                        common = [c for c in src_cols if c in dst_cols]
+                        if not common:
+                            continue
+                        col_sql = ",".join('"'+c.replace('"','""')+'"' for c in common)
+                        qmarks = ",".join("?" for _ in common)
+                        rows = old.execute(f"SELECT {col_sql} FROM \"{table}\"").fetchall()
+                        for row in rows:
+                            DB.execute(
+                                f"INSERT OR IGNORE INTO \"{table}\" ({col_sql}) VALUES ({qmarks})",
+                                tuple(row[c] for c in common)
+                            )
+                            if DB.total_changes:
+                                restored_rows += 1
+                    except Exception as table_error:
+                        print(f"[RESTORE] Skipped table {table}: {table_error}")
+
+                DB.commit()
+                old.close()
+
+                # Restore config only when a key is missing. Never overwrite
+                # an existing live setting, including ticket configuration.
+                if cfg_name:
+                    try:
+                        backup_cfg = json.loads(z.read(cfg_name).decode("utf-8"))
+                        if Path(CONFIG_FILE).exists():
+                            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                                current_cfg = json.load(f)
+                        else:
+                            current_cfg = {}
+                        changed = False
+                        for key, value in backup_cfg.items():
+                            if key not in current_cfg:
+                                current_cfg[key] = value
+                                changed = True
+                        if changed or not Path(CONFIG_FILE).exists():
+                            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                                json.dump(current_cfg, f, indent=2)
+                    except Exception as cfg_error:
+                        print(f"[RESTORE] Config merge skipped: {cfg_error}")
+
+                print(f"[RESTORE] Legacy backup checked; restored {restored_rows} missing row(s). Existing data preserved.")
+    except Exception as e:
+        print(f"[RESTORE ERROR] {type(e).__name__}: {e}")
+
+
+_safe_restore_legacy_backup()
 
 message_cache = defaultdict(lambda: [0, 0])
 voice_join_times = {}
@@ -490,16 +585,31 @@ async def on_message(message):
                     elif action == "kick":
                         await message.author.kick(reason="AutoMod violation")
                 except Exception: pass
+                triggers = []
+                if bad_hit: triggers.append("bad words")
+                if link_hit: triggers.append("links")
+                if caps_hit: triggers.append("excessive caps")
+                if mention_hit: triggers.append("mention limit")
+                if invite_hit: triggers.append("Discord invite")
+                if length_hit: triggers.append("message length")
+                if duplicate_hit: triggers.append("duplicate message")
+                if spam_hit: triggers.append("AutoMod spam")
+                await send_log(
+                    guild,
+                    "🤖 AutoMod Violation",
+                    f"**Member:** {message.author.mention} (`{message.author.id}`)\n**Channel:** {message.channel.mention}\n**Trigger:** {', '.join(triggers) or 'unknown'}\n**Action:** {action}",
+                    discord.Color.orange(),
+                    "automod"
+                )
                 return
 
-    if message.content.startswith(custom_prefix):
-        ctx = await bot.get_context(message)
-
-        if ctx.command:
-            await bot.invoke(ctx)
-            return
-
-    await bot.process_commands(message)
+    # Always pass messages through discord.py's command parser.
+    # This is important because this bot has a custom on_message handler;
+    # without process_commands(), prefix commands can silently stop working.
+    try:
+        await bot.process_commands(message)
+    except Exception as e:
+        print(f"[PREFIX COMMAND ERROR] {type(e).__name__}: {e}")
 
 
 # =========================================================
@@ -553,6 +663,59 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
     except Exception as e:
         print(f"Error in on_member_ban anti-nuke: {e}")
 
+
+
+@bot.event
+async def on_guild_channel_update(before, after):
+    if before.name == after.name and before.category_id == after.category_id and before.overwrites == after.overwrites:
+        return
+    changes = []
+    if before.name != after.name:
+        changes.append(f"**Name:** `{before.name}` → `{after.name}`")
+    if before.category_id != after.category_id:
+        changes.append(f"**Category:** `{before.category_id or 'None'}` → `{after.category_id or 'None'}`")
+    if changes:
+        await send_log(after.guild, "✏️ Channel Updated", f"**Channel:** {after.mention} (`{after.id}`)\n" + "\n".join(changes), discord.Color.orange(), "channel")
+
+@bot.event
+async def on_guild_role_create(role):
+    await send_log(role.guild, "🎭 Role Created", f"**Role:** {role.mention}\n**ID:** `{role.id}`", discord.Color.green(), "role")
+
+@bot.event
+async def on_guild_role_delete(role):
+    await send_log(role.guild, "🗑️ Role Deleted", f"**Role:** `{role.name}` (`{role.id}`)", discord.Color.red(), "role")
+
+@bot.event
+async def on_guild_role_update(before, after):
+    changes = []
+    if before.name != after.name:
+        changes.append(f"**Name:** `{before.name}` → `{after.name}`")
+    if before.permissions != after.permissions:
+        changes.append("**Permissions:** changed")
+    if before.position != after.position:
+        changes.append(f"**Position:** `{before.position}` → `{after.position}`")
+    if before.color != after.color:
+        changes.append("**Color:** changed")
+    if changes:
+        await send_log(after.guild, "✏️ Role Updated", f"**Role:** {after.mention} (`{after.id}`)\n" + "\n".join(changes), discord.Color.orange(), "role")
+
+@bot.event
+async def on_member_update(before, after):
+    if before.bot:
+        return
+    changes = []
+    if before.nick != after.nick:
+        changes.append(f"**Nickname:** `{before.nick or 'None'}` → `{after.nick or 'None'}`")
+    before_roles = {r.id for r in before.roles}
+    after_roles = {r.id for r in after.roles}
+    added = after_roles - before_roles
+    removed = before_roles - after_roles
+    if added:
+        changes.append("**Roles added:** " + ", ".join(f"<@&{rid}>" for rid in added))
+    if removed:
+        changes.append("**Roles removed:** " + ", ".join(f"<@&{rid}>" for rid in removed))
+    if changes:
+        await send_log(after.guild, "👤 Member Updated", f"**Member:** {after.mention} (`{after.id}`)\n" + "\n".join(changes), discord.Color.orange(), "member")
 
 @bot.event
 async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
@@ -1686,7 +1849,8 @@ class SimpleWelcomeModal(
 class WelcomeSelectView(discord.ui.View):
 
     def __init__(self):
-        super().__init__(timeout=60)
+        # Give administrators enough time to select a channel and submit the modal.
+        super().__init__(timeout=900)
 
     @discord.ui.select(
         cls=discord.ui.ChannelSelect,
@@ -1765,51 +1929,15 @@ async def disable_welcome(
 
 @bot.hybrid_command(
     name="setup_invitelog",
+    aliases=["setinvitelog", "invitelog"],
     description="Set channel for invite logs."
 )
 @permission_check("administrator")
 @app_permission_check("administrator")
-async def setup_invitelog(
-    ctx: commands.Context,
-    channel: discord.TextChannel = None
-):
-
-
-    # Persistent invite accounting: valid/left/rejoin/active + 100 coins per new invite.
-    try:
-        ensure_guild(guild.id)
-        existing = DB.execute("SELECT * FROM invite_members WHERE guild_id=? AND member_id=?", (guild.id, member.id)).fetchone()
-        if inviter_user:
-            if existing:
-                DB.execute("UPDATE invite_members SET inviter_id=?, joined_at=?, left_at=NULL, join_count=join_count+1 WHERE guild_id=? AND member_id=?", (inviter_user.id, datetime.now(timezone.utc).isoformat(), guild.id, member.id))
-                DB.execute("INSERT OR IGNORE INTO invite_stats(guild_id,user_id) VALUES (?,?)", (guild.id, inviter_user.id))
-                DB.execute("UPDATE invite_stats SET rejoins=rejoins+1, active=active+1 WHERE guild_id=? AND user_id=?", (guild.id, inviter_user.id))
-            else:
-                DB.execute("INSERT OR REPLACE INTO invite_members(guild_id,member_id,inviter_id,joined_at,left_at,join_count) VALUES (?,?,?,?,NULL,1)", (guild.id, member.id, inviter_user.id, datetime.now(timezone.utc).isoformat()))
-                DB.execute("INSERT OR IGNORE INTO invite_stats(guild_id,user_id) VALUES (?,?)", (guild.id, inviter_user.id))
-                age_days=(datetime.now(timezone.utc)-member.created_at).total_seconds()/86400
-                if age_days < 7:
-                    DB.execute("UPDATE invite_stats SET total=total+1, fake=fake+1 WHERE guild_id=? AND user_id=?", (guild.id, inviter_user.id))
-                else:
-                    DB.execute("UPDATE invite_stats SET total=total+1, valid=valid+1, active=active+1, coins_awarded=coins_awarded+100 WHERE guild_id=? AND user_id=?", (guild.id, inviter_user.id))
-                    ensure_user(guild.id, inviter_user.id)
-                    DB.execute("UPDATE user_stats SET coins=coins+100 WHERE guild_id=? AND user_id=?", (guild.id, inviter_user.id))
-            DB.commit()
-    except Exception as e:
-        print(f"[INVITE DB ERROR] {e}")
-
-    global invite_log_channel_id
-
+async def setup_invitelog(ctx: commands.Context, channel: discord.TextChannel = None):
     target = channel or ctx.channel
-
-    invite_log_channel_id = target.id
     set_guild_setting(ctx.guild.id, "invite_log_channel_id", target.id)
-    save_persistent_settings()
-
-    await ctx.send(
-        f"✅ **Invite Logger set to:** "
-        f"{target.mention}"
-    )
+    await send_mod_result(ctx, f"📨 Invite logs will now be sent to {target.mention}.")
 
 
 @bot.hybrid_command(
@@ -2266,7 +2394,7 @@ async def on_member_join(member):
     except Exception:
         pass
 
-    await send_log(guild, "📥 Member Joined", f"**Member:** {member.mention} (`{member.id}`)", discord.Color.green())
+    await send_log(guild, "📥 Member Joined", f"**Member:** {member.mention} (`{member.id}`)", discord.Color.green(), "member")
 
     global invite_log_channel_id
 
@@ -2375,7 +2503,7 @@ async def send_mod_result(ctx, text, ephemeral=False):
 @bot.event
 async def on_member_remove(member):
     guild=member.guild
-    await send_log(guild, "📤 Member Left", f"**Member:** {member.mention} (`{member.id}`)", discord.Color.red())
+    await send_log(guild, "📤 Member Left", f"**Member:** {member.mention} (`{member.id}`)", discord.Color.red(), "member")
     try:
         row=DB.execute("SELECT inviter_id FROM invite_members WHERE guild_id=? AND member_id=?",(guild.id,member.id)).fetchone()
         if row and row["inviter_id"]:
@@ -2517,27 +2645,84 @@ async def nick_cmd(ctx,member:discord.Member,nickname:str=None):
     except discord.Forbidden: await send_mod_result(ctx,"❌ I cannot change that member's nickname.",True)
 
 # Logging
-@bot.hybrid_command(name="setlog",description="Set the server moderation/event log channel.")
+LOG_CHANNEL_KEYS = {
+    "moderation": "log_channel_id",
+    "member": "member_log_channel_id",
+    "message": "message_log_channel_id",
+    "voice": "voice_log_channel_id",
+    "invite": "invite_log_channel_id",
+    "automod": "automod_log_channel_id",
+    "channel": "channel_log_channel_id",
+    "role": "role_log_channel_id",
+}
+
+async def send_log(guild, title, description, color=discord.Color.blurple(), category="moderation"):
+    if not guild:
+        return
+    key = LOG_CHANNEL_KEYS.get(category, "log_channel_id")
+    cid = get_guild_setting(guild.id, key)
+    if not cid:
+        return
+    ch = guild.get_channel(int(cid))
+    if not ch:
+        return
+    try:
+        embed = discord.Embed(title=title, description=description[:4000], color=color, timestamp=datetime.now(timezone.utc))
+        await ch.send(embed=embed)
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+
+@bot.hybrid_command(name="setlog", description="Set an independent log channel for a log category.")
+@app_commands.describe(channel="Channel where this log category should be sent", category="Log category")
 @permission_check("administrator")
 @app_permission_check("administrator")
-async def setlog_cmd(ctx,channel:discord.TextChannel):
-    set_guild_setting(ctx.guild.id,"log_channel_id",channel.id); await send_mod_result(ctx,f"📜 Log channel set to {channel.mention}.")
+async def setlog_cmd(ctx, channel: discord.TextChannel, category: Literal["moderation","member","message","voice","invite","automod","channel","role"] = "moderation"):
+    key = LOG_CHANNEL_KEYS[category]
+    set_guild_setting(ctx.guild.id, key, channel.id)
+    await send_mod_result(ctx, f"📜 **{category.title()} logs** will now be sent to {channel.mention}.")
 
-async def send_log(guild,title,description,color=discord.Color.blurple()):
-    cid=get_guild_setting(guild.id,"log_channel_id")
-    if not cid:return
-    ch=guild.get_channel(int(cid))
-    if ch:
-        try: await ch.send(embed=discord.Embed(title=title,description=description,color=color,timestamp=datetime.now(timezone.utc)))
-        except Exception: pass
+@bot.hybrid_command(name="setmemberlog", aliases=["memberlog"], description="Set the member join/leave log channel.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def setmemberlog_cmd(ctx, channel: discord.TextChannel):
+    set_guild_setting(ctx.guild.id, "member_log_channel_id", channel.id)
+    await send_mod_result(ctx, f"👥 Member logs will now be sent to {channel.mention}.")
+
+@bot.hybrid_command(name="setmessagelog", aliases=["msglog"], description="Set the message edit/delete log channel.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def setmessagelog_cmd(ctx, channel: discord.TextChannel):
+    set_guild_setting(ctx.guild.id, "message_log_channel_id", channel.id)
+    await send_mod_result(ctx, f"💬 Message logs will now be sent to {channel.mention}.")
+
+@bot.hybrid_command(name="setautomodlog", aliases=["amlog"], description="Set the AutoMod violation log channel.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def setautomodlog_cmd(ctx, channel: discord.TextChannel):
+    set_guild_setting(ctx.guild.id, "automod_log_channel_id", channel.id)
+    await send_mod_result(ctx, f"🤖 AutoMod logs will now be sent to {channel.mention}.")
+
+@bot.hybrid_command(name="setchannellog", aliases=["channelog"], description="Set the channel create/delete/update log channel.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def setchannellog_cmd(ctx, channel: discord.TextChannel):
+    set_guild_setting(ctx.guild.id, "channel_log_channel_id", channel.id)
+    await send_mod_result(ctx, f"📁 Channel logs will now be sent to {channel.mention}.")
+
+@bot.hybrid_command(name="setrolelog", aliases=["rolelog"], description="Set the role create/delete/update log channel.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def setrolelog_cmd(ctx, channel: discord.TextChannel):
+    set_guild_setting(ctx.guild.id, "role_log_channel_id", channel.id)
+    await send_mod_result(ctx, f"🎭 Role logs will now be sent to {channel.mention}.")
 
 @bot.event
 async def on_message_delete(message):
-    if message.guild and not message.author.bot: await send_log(message.guild,"🗑️ Message Deleted",f"**Author:** {message.author.mention}\n**Channel:** {message.channel.mention}\n**Content:** {(message.content or '[no text]')[:1500]}",discord.Color.red())
+    if message.guild and not message.author.bot: await send_log(message.guild,"🗑️ Message Deleted",f"**Author:** {message.author.mention}\n**Channel:** {message.channel.mention}\n**Content:** {(message.content or '[no text]')[:1500]}",discord.Color.red(),"message")
 
 @bot.event
 async def on_message_edit(before,after):
-    if before.guild and not before.author.bot and before.content!=after.content: await send_log(before.guild,"✏️ Message Edited",f"**Author:** {before.author.mention}\n**Channel:** {before.channel.mention}\n**Before:** {(before.content or '[no text]')[:700]}\n**After:** {(after.content or '[no text]')[:700]}",discord.Color.orange())
+    if before.guild and not before.author.bot and before.content!=after.content: await send_log(before.guild,"✏️ Message Edited",f"**Author:** {before.author.mention}\n**Channel:** {before.channel.mention}\n**Before:** {(before.content or '[no text]')[:700]}\n**After:** {(after.content or '[no text]')[:700]}",discord.Color.orange(),"message")
 
 async def on_member_ban_logger(guild,user):
     await send_log(guild,"🔨 Member Banned",f"**User:** {user.mention} (`{user.id}`)",discord.Color.red())
@@ -2553,10 +2738,10 @@ async def on_member_ban_logger(guild,user):
 
 @bot.event
 async def on_guild_channel_create(channel):
-    await send_log(channel.guild,"📁 Channel Created",f"{channel.mention} (`{channel.id}`)",discord.Color.green())
+    await send_log(channel.guild,"📁 Channel Created",f"{channel.mention} (`{channel.id}`)",discord.Color.green(),"channel")
 
 async def on_guild_channel_delete_log(channel):
-    await send_log(channel.guild,"🗑️ Channel Deleted",f"**Channel:** #{channel.name} (`{channel.id}`)",discord.Color.red())
+    await send_log(channel.guild,"🗑️ Channel Deleted",f"**Channel:** #{channel.name} (`{channel.id}`)",discord.Color.red(),"channel")
 
 # AutoMod configuration
 @bot.hybrid_command(name="automod",aliases=["am"],description="Configure AutoMod: on/off, words, links, caps, mentions, action.")
@@ -2619,7 +2804,7 @@ async def pay_cmd(ctx,member:discord.Member,amount:int):
     DB.execute("UPDATE user_stats SET coins=coins-? WHERE guild_id=? AND user_id=?",(amount,ctx.guild.id,ctx.author.id)); DB.execute("UPDATE user_stats SET coins=coins+? WHERE guild_id=? AND user_id=?",(amount,ctx.guild.id,member.id)); DB.commit(); await send_mod_result(ctx,f"💸 {ctx.author.mention} paid **{amount:,}** coins to {member.mention}.")
 
 # Invite statistics
-@bot.hybrid_command(name="inviteleaderboard",aliases=["ilb"],description="Show the server invite leaderboard.")
+@bot.hybrid_command(name="inviteleaderboard",aliases=["ilb", "invite_lb", "il"],description="Show the server invite leaderboard.")
 async def inviteleaderboard_cmd(ctx):
     rows=DB.execute("SELECT user_id,total,valid,left_count,rejoins,active FROM invite_stats WHERE guild_id=? ORDER BY valid DESC LIMIT 10",(ctx.guild.id,)).fetchall(); lines=[]
     for i,r in enumerate(rows,1):lines.append(f"**{i}.** <@{r['user_id']}> — `{r['valid']}` valid • `{r['left_count']}` left • `{r['rejoins']}` rejoins • `{r['active']}` active")
@@ -2785,7 +2970,7 @@ async def help_cmd(ctx):
       ("📊 Stats","`stats` `messagecount` `leaderboard` `messageleaderboard` `voiceleaderboard` `invites` `inviter` `inviteinfo` `inviteleaderboard` `membercount`"),
       ("💰 Economy","`balance` `pay` — 1 coin/message + 100 coins/new valid invite"),
       ("🔎 Information","`serverinfo` `roleinfo` `userinfo` `channelinfo` `avatar` `servericon` `permissions`"),
-      ("⚙️ Admin","`set_prefix` `dmall` `setup_invitelog` `setvclog` `logging`"),
+      ("⚙️ Admin","`set_prefix` `dmall` `setlog` `setmemberlog` `setmessagelog` `setvclog` `setinvitelog` `setautomodlog` `setchannellog` `setrolelog` `logging`"),
     ]
     for n,v in fields:e.add_field(name=n,value=v,inline=False)
     e.set_footer(text="Agni • All-rounder Discord bot")
@@ -3164,25 +3349,27 @@ async def setvclog_cmd(ctx, channel: discord.TextChannel = None):
     if channel is None:
         set_guild_setting(ctx.guild.id, "log_channel_id", None)
         return await send_mod_result(ctx, "❌ Voice logging cannot be enabled without a channel. Use `/setvclog #channel`.", True)
-    set_guild_setting(ctx.guild.id, "log_channel_id", channel.id)
-    await send_mod_result(ctx, f"🎙️ Voice/event logs will be sent to {channel.mention}.")
+    set_guild_setting(ctx.guild.id, "voice_log_channel_id", channel.id)
+    await send_mod_result(ctx, f"🎙️ Voice logs will now be sent to {channel.mention}.")
 
 @bot.hybrid_command(name="logging", aliases=["logs", "logstatus"], description="Show the current Agni logging configuration.")
 @permission_check("administrator")
 @app_permission_check("administrator")
 async def logging_cmd(ctx):
-    cid = get_guild_setting(ctx.guild.id, "log_channel_id")
-    iid = get_guild_setting(ctx.guild.id, "invite_log_channel_id")
-    gid = get_guild_setting(ctx.guild.id, "goodbye_channel_id")
-    sid = get_guild_setting(ctx.guild.id, "suggestion_channel_id")
-    lines = [
-        f"**Event/Moderation logs:** {f'<#{cid}>' if cid else 'Not configured'}",
-        f"**Invite logs:** {f'<#{iid}>' if iid else 'Not configured'}",
-        f"**Join/Leave logs:** {f'<#{cid}>' if cid else 'Not configured'}",
-        f"**Voice logs:** {f'<#{cid}>' if cid else 'Not configured'}",
-        f"**Goodbye channel:** {f'<#{gid}>' if gid else 'Not configured'}",
-        f"**Suggestions:** {f'<#{sid}>' if sid else 'Not configured'}",
+    labels = [
+        ("Moderation", "log_channel_id"),
+        ("Member Join/Leave", "member_log_channel_id"),
+        ("Message Edit/Delete", "message_log_channel_id"),
+        ("Voice", "voice_log_channel_id"),
+        ("Invites", "invite_log_channel_id"),
+        ("AutoMod", "automod_log_channel_id"),
+        ("Channels", "channel_log_channel_id"),
+        ("Roles", "role_log_channel_id"),
     ]
+    lines = []
+    for label, key in labels:
+        cid = get_guild_setting(ctx.guild.id, key)
+        lines.append(f"**{label}:** {f'<#{cid}>' if cid else 'Not configured'}")
     await ctx.send(embed=discord.Embed(title="📜 Agni Logging Status", description="\n".join(lines), color=discord.Color.blurple()))
 
 @bot.event
@@ -3204,11 +3391,11 @@ async def on_voice_state_update(member, before, after):
 
     # Log joins, leaves and moves.
     if before.channel is None and after.channel is not None:
-        await send_log(member.guild, "🎙️ Voice Joined", f"**Member:** {member.mention}\n**Channel:** {after.channel.mention}", discord.Color.green())
+        await send_log(member.guild, "🎙️ Voice Joined", f"**Member:** {member.mention}\n**Channel:** {after.channel.mention}", discord.Color.green(), "voice")
     elif before.channel is not None and after.channel is None:
-        await send_log(member.guild, "🎙️ Voice Left", f"**Member:** {member.mention}\n**Channel:** {before.channel.mention}", discord.Color.red())
+        await send_log(member.guild, "🎙️ Voice Left", f"**Member:** {member.mention}\n**Channel:** {before.channel.mention}", discord.Color.red(), "voice")
     elif before.channel != after.channel:
-        await send_log(member.guild, "🔀 Voice Channel Moved", f"**Member:** {member.mention}\n**From:** {before.channel.mention if before.channel else 'None'}\n**To:** {after.channel.mention if after.channel else 'None'}", discord.Color.orange())
+        await send_log(member.guild, "🔀 Voice Channel Moved", f"**Member:** {member.mention}\n**From:** {before.channel.mention if before.channel else 'None'}\n**To:** {after.channel.mention if after.channel else 'None'}", discord.Color.orange(), "voice")
 
     # Log self/server mute/deafen changes.
     changes = []
@@ -3221,7 +3408,7 @@ async def on_voice_state_update(member, before, after):
     if before.deaf != after.deaf:
         changes.append(f"Server deafen: **{after.deaf}**")
     if changes:
-        await send_log(member.guild, "🎙️ Voice State Updated", f"**Member:** {member.mention}\n" + "\n".join(changes), discord.Color.gold())
+        await send_log(member.guild, "🎙️ Voice State Updated", f"**Member:** {member.mention}\n" + "\n".join(changes), discord.Color.gold(), "voice")
 
 @bot.event
 async def on_member_remove_with_logging(member):
@@ -3249,6 +3436,61 @@ async def quickpoll_cmd(ctx, question: str):
     msg = await ctx.send(embed=embed)
     await msg.add_reaction("👍")
     await msg.add_reaction("👎")
+
+
+# =========================================================
+# GLOBAL COMMAND ERROR HANDLERS
+# =========================================================
+
+@bot.event
+async def on_command_error(ctx: commands.Context, error: commands.CommandError):
+    # Ignore errors already handled by command-specific handlers.
+    if getattr(ctx.command, "on_error", None):
+        return
+    original = getattr(error, "original", error)
+    if isinstance(original, commands.CommandNotFound):
+        return
+    if isinstance(original, commands.MissingPermissions):
+        text = "❌ You do not have permission to use this command."
+    elif isinstance(original, commands.BotMissingPermissions):
+        text = "❌ I am missing the required permissions to run this command."
+    elif isinstance(original, commands.MissingRequiredArgument):
+        text = f"❌ Missing argument: `{original.param.name}`. Use `/help` for usage."
+    elif isinstance(original, commands.BadArgument):
+        text = "❌ One or more arguments are invalid. Use `/help` for usage."
+    else:
+        print(f"[COMMAND ERROR] {type(original).__name__}: {original}")
+        text = "❌ An error occurred while running that command. Please try again."
+    try:
+        await ctx.send(text, ephemeral=True)
+    except Exception:
+        try:
+            await ctx.send(text)
+        except Exception:
+            pass
+
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    original = getattr(error, "original", error)
+    if isinstance(original, app_commands.CheckFailure):
+        text = "❌ You do not have permission to use this command in this server."
+    elif isinstance(original, app_commands.MissingPermissions):
+        text = "❌ You do not have the required permissions to use this command."
+    elif isinstance(original, app_commands.BotMissingPermissions):
+        text = "❌ I am missing the required permissions to run this command."
+    elif isinstance(original, app_commands.CommandOnCooldown):
+        text = "⏳ This command is on cooldown. Please try again shortly."
+    else:
+        print(f"[SLASH COMMAND ERROR] {type(original).__name__}: {original}")
+        text = "❌ An error occurred while running that command. Please try again."
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(text, ephemeral=True)
+        else:
+            await interaction.response.send_message(text, ephemeral=True)
+    except Exception as e:
+        print(f"[SLASH ERROR RESPONSE FAILED] {type(e).__name__}: {e}")
 
 
 # =========================================================
