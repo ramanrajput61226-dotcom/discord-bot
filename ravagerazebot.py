@@ -3028,7 +3028,7 @@ async def help_cmd(ctx):
         )
         aliases = f" (aliases: {', '.join(command.aliases)})" if command.aliases else ""
         line = f"**{command.name}**{aliases} — {description.splitlines()[0][:100]}"
-        if current and (len(current) >= 15 or sum(len(item) + 1 for item in current) + len(line) > 3800):
+        if current and (len(current) >= 15 or sum(len(item) + 1 for item in current) + len(line) > 950):
             pages.append(current)
             current = []
         current.append(line)
