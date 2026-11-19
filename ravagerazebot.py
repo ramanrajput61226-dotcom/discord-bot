@@ -181,6 +181,8 @@ try:
 except Exception as e: print(f"[GIVEAWAY DB ERROR] {e}")
 for _sql in (
     "ALTER TABLE guild_settings ADD COLUMN welcome_enabled INTEGER DEFAULT 0",
+    "ALTER TABLE guild_settings ADD COLUMN welcome_channel_id INTEGER",
+    "ALTER TABLE guild_settings ADD COLUMN ticket_log_channel_id INTEGER",
     "ALTER TABLE guild_settings ADD COLUMN welcome_message TEXT",
     "ALTER TABLE guild_settings ADD COLUMN welcome_image TEXT",
     "ALTER TABLE guild_settings ADD COLUMN invite_log_channel_id INTEGER",
@@ -1036,14 +1038,22 @@ class CloseTicketModal(discord.ui.Modal, title="Close Ticket"):
                     print(f"[TRANSCRIPT LOG ERROR] {type(error).__name__}: {error}")
 
             if not delivered:
+                # Transcript delivery is best-effort; it must not block closing.
+                print(f"[TICKET CLOSE] Transcript could not be delivered for channel {channel.id}; proceeding with authorized close.")
+
+            bot_member = guild.me or (guild.get_member(bot.user.id) if bot.user else None)
+            if bot_member is None or not channel.permissions_for(bot_member).manage_channels:
                 return await interaction.followup.send(
-                    "⚠️ Transcript delivery failed. The ticket has NOT been deleted; "
-                    "enable the opener's DMs or configure a ticket log channel.",
+                    "❌ I cannot delete this ticket channel. Give my bot role the Manage Channels permission, then press Close Ticket again.",
                     ephemeral=True
                 )
 
-            await interaction.followup.send("✅ Transcript delivered. Closing ticket…", ephemeral=True)
-            await asyncio.sleep(2)
+            await interaction.followup.send(
+                "✅ Transcript delivered. Closing ticket…" if delivered
+                else "⚠️ Transcript could not be delivered, but the ticket is being closed.",
+                ephemeral=True
+            )
+            await asyncio.sleep(1)
             await channel.delete(reason=f"Ticket closed by {closer}: {close_reason}")
         except Exception as error:
             print(f"[TICKET CLOSE ERROR] {type(error).__name__}: {error}")
@@ -1937,19 +1947,67 @@ async def setup_welcome(
 )
 @permission_check("administrator")
 @app_permission_check("administrator")
-async def disable_welcome(
-    ctx: commands.Context
-):
-
-    global welcome_enabled
-
-    welcome_enabled = False
+async def disable_welcome(ctx: commands.Context):
     set_guild_setting(ctx.guild.id, "welcome_enabled", 0)
-    save_persistent_settings()
+    await send_mod_result(ctx, "❌ **Welcome system has been disabled.**")
 
-    await ctx.send(
-        "❌ **Welcome system has been disabled.**"
-    )
+
+@bot.hybrid_command(name="enable_welcome", description="Enable the configured welcome system.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def enable_welcome_cmd(ctx: commands.Context):
+    channel_id = get_guild_setting(ctx.guild.id, "welcome_channel_id")
+    channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+    if not isinstance(channel, discord.TextChannel):
+        return await send_mod_result(ctx, "❌ Set a welcome channel first with /welcome_channel.")
+    set_guild_setting(ctx.guild.id, "welcome_enabled", 1)
+    await send_mod_result(ctx, f"✅ Welcome messages enabled in {channel.mention}.")
+
+
+@bot.hybrid_command(name="welcome_channel", description="Set the channel for welcome messages.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def welcome_channel_cmd(ctx: commands.Context, channel: discord.TextChannel):
+    set_guild_setting(ctx.guild.id, "welcome_channel_id", channel.id)
+    await send_mod_result(ctx, f"✅ Welcome channel set to {channel.mention}.")
+
+
+@bot.hybrid_command(name="welcome_message", description="Edit the welcome message. Placeholders: user, server, count, inviter.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def welcome_message_cmd(ctx: commands.Context, *, message: str):
+    if len(message) > 1000:
+        return await send_mod_result(ctx, "❌ Welcome message must be 1000 characters or fewer.")
+    set_guild_setting(ctx.guild.id, "welcome_message", message)
+    await send_mod_result(ctx, "✅ Welcome message updated. Placeholders: {user}, {server}, {count}, {inviter}.")
+
+
+@bot.hybrid_command(name="welcome_image", description="Set or clear the welcome embed image URL.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def welcome_image_cmd(ctx: commands.Context, url: str = "none"):
+    value = None if url.lower() in {"none", "off", "clear"} else url.strip()
+    if value and not re.match(r"^https?://", value, re.I):
+        return await send_mod_result(ctx, "❌ Image must be a valid HTTP(S) URL, or use none to clear it.")
+    set_guild_setting(ctx.guild.id, "welcome_image", value)
+    await send_mod_result(ctx, "✅ Welcome image cleared." if value is None else "✅ Welcome image URL updated.")
+
+
+@bot.hybrid_command(name="welcome_status", description="Show the current welcome configuration.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def welcome_status_cmd(ctx: commands.Context):
+    enabled = bool(get_guild_setting(ctx.guild.id, "welcome_enabled", 0))
+    channel_id = get_guild_setting(ctx.guild.id, "welcome_channel_id")
+    channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+    message = get_guild_setting(ctx.guild.id, "welcome_message", None) or "Default welcome message"
+    image = get_guild_setting(ctx.guild.id, "welcome_image", None) or "Not set"
+    embed = discord.Embed(title="👋 Welcome Settings", color=discord.Color.green() if enabled else discord.Color.orange())
+    embed.add_field(name="Status", value="Enabled" if enabled else "Disabled", inline=True)
+    embed.add_field(name="Channel", value=channel.mention if channel else "Not set / unavailable", inline=True)
+    embed.add_field(name="Message", value=str(message)[:1024], inline=False)
+    embed.add_field(name="Image URL", value=str(image)[:1024], inline=False)
+    await ctx.send(embed=embed)
 
 
 # =========================================================
