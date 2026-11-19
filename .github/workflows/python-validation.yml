@@ -1,0 +1,22 @@
+name: Python validation
+
+on:
+  push:
+    branches: [main, premium-upgrade]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip discord.py flask pytest
+      - name: Compile bot
+        run: python -m py_compile ravagerazebot.py keep_alive.py
+      - name: Run regression tests
+        run: pytest -q
