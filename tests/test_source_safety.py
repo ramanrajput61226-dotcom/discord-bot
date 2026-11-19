@@ -60,3 +60,12 @@ def test_economy_transfer_uses_atomic_conditional_debit():
     assert 'DB.execute("BEGIN IMMEDIATE")' in pay_flow
     assert "coins >= ?" in pay_flow
     assert "DB.rollback()" in pay_flow
+
+
+def test_moderation_thresholds_are_per_guild():
+    source = read_source()
+    assert 'ADD COLUMN nuke_ban_limit INTEGER DEFAULT 5' in source
+    assert 'ADD COLUMN nuke_channel_limit INTEGER DEFAULT 3' in source
+    assert 'ADD COLUMN automod_spam_limit INTEGER DEFAULT 5' in source
+    assert 'get_guild_setting(guild.id, "nuke_ban_limit", ban_limit)' in source
+    assert 'get_guild_setting(guild.id, "nuke_channel_limit", channel_limit)' in source
