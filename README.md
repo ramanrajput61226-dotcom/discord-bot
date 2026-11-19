@@ -24,7 +24,7 @@ The optional Flask server starts alongside the bot. `/` returns service status J
 ## Permissions and safety
 Grant only the permissions required by enabled features. Typical moderation/ticket features need View Channels, Send Messages, Read Message History, Manage Channels, Manage Messages, Moderate Members and role-specific moderation permissions. The bot's highest role must be above roles it manages.
 
-Configure independent log channels with `/setlog`. Ticket transcript delivery uses the ticket log channel when configured, with the general log channel as fallback. Ticket deletion is blocked if transcript generation or delivery fails.
+Configure independent log channels with `/setlog`. Welcome setup supports `/welcome_channel`, `/welcome_message`, `/welcome_image`, `/enable_welcome`, `/welcome_status`, and `/disable_welcome`. Message placeholders: `{user}`, `{server}`, `{count}`, `{inviter}`. Ticket transcript delivery uses the ticket log channel when configured, with the general log channel as fallback. Ticket transcript delivery is best-effort; authorized ticket closure still deletes the channel when the bot has Manage Channels permission. If that permission is missing, the bot reports the exact permission needed and keeps the channel safe.
 
 ## Validation
 ```bash
