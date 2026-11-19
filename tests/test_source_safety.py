@@ -91,3 +91,11 @@ def test_help_menu_is_generated_from_registered_commands():
     help_flow = source[start:end]
     assert "for command in bot.commands" in help_flow
     assert "Available commands" in help_flow
+
+
+def test_live_database_backups_are_not_embedded_in_source():
+    source = read_source()
+    assert "_AGNI_EMBEDDED_DB" not in source
+    assert "_BACKUP_DB_B64" not in source
+    assert "_BACKUP_CONFIG_B64" not in source
+    assert "restore_supplied_backup_if_missing" not in source
