@@ -3018,7 +3018,7 @@ async def help_cmd(ctx):
       ("🚨 Security / AutoMod","`set_ban_limit` `set_channel_limit` `set_spam_limit` `automod` `automod_status` `automod_reset` `raidmode` `setraid` `raidstatus` `raidaction` `lockdown` `unlockdown` `setlog`"),
       ("🎫 Tickets","`setup_ticket` `edit_ticket` `ticket_log_channel` `set_ticket_ping`"),
       ("🎉 Giveaways","`giveaway` `reroll` `giveawayfixed` `giveaway_help`"),
-      ("👋 Community","`setup_welcome` `disable_welcome` `setautorole` `setgoodbye` `afk` `suggest` `setsuggestions` `poll` `setupverification` `rolepanel`"),
+      ("👋 Community","`setup_welcome` `welcome_channel` `welcome_message` `welcome_image` `enable_welcome` `welcome_status` `disable_welcome` `setautorole` `setgoodbye` `afk` `suggest` `setsuggestions` `poll` `setupverification` `rolepanel`"),
       ("📊 Stats","`stats` `messagecount` `leaderboard` `messageleaderboard` `voiceleaderboard` `invites` `inviter` `inviteinfo` `inviteleaderboard` `membercount`"),
       ("💰 Economy","`balance` `pay` — 1 coin/message + 100 coins/new valid invite"),
       ("🔎 Information","`serverinfo` `roleinfo` `userinfo` `channelinfo` `avatar` `servericon` `permissions`"),
