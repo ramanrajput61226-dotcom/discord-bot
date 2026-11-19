@@ -42,7 +42,7 @@ except ImportError:
         pass
 
 
-OWNER_ID = 1255544682759323680
+OWNER_ID = int(os.getenv("BOT_OWNER_ID") or "1255544682759323680")
 
 ban_limit = 5
 channel_limit = 3
@@ -97,6 +97,7 @@ DB = sqlite3.connect(DB_FILE, check_same_thread=False)
 DB.row_factory = sqlite3.Row
 DB.execute("PRAGMA journal_mode=WAL")
 DB.execute("PRAGMA foreign_keys=ON")
+DB.execute("PRAGMA busy_timeout=5000")
 DB.execute("""CREATE TABLE IF NOT EXISTS guild_settings (
     guild_id INTEGER PRIMARY KEY,
     log_channel_id INTEGER,
