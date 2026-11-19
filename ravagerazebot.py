@@ -42,7 +42,7 @@ except ImportError:
         pass
 
 
-OWNER_ID = 1255544682759323680
+OWNER_ID = int(os.getenv("BOT_OWNER_ID") or "1255544682759323680")
 
 ban_limit = 5
 channel_limit = 3
@@ -97,6 +97,7 @@ DB = sqlite3.connect(DB_FILE, check_same_thread=False)
 DB.row_factory = sqlite3.Row
 DB.execute("PRAGMA journal_mode=WAL")
 DB.execute("PRAGMA foreign_keys=ON")
+DB.execute("PRAGMA busy_timeout=5000")
 DB.execute("""CREATE TABLE IF NOT EXISTS guild_settings (
     guild_id INTEGER PRIMARY KEY,
     log_channel_id INTEGER,
@@ -197,6 +198,9 @@ for _sql in (
     "ALTER TABLE guild_settings ADD COLUMN raid_threshold INTEGER DEFAULT 5",
     "ALTER TABLE guild_settings ADD COLUMN raid_window INTEGER DEFAULT 10",
     "ALTER TABLE guild_settings ADD COLUMN raid_action TEXT DEFAULT 'lockdown'",
+    "ALTER TABLE guild_settings ADD COLUMN nuke_ban_limit INTEGER DEFAULT 5",
+    "ALTER TABLE guild_settings ADD COLUMN nuke_channel_limit INTEGER DEFAULT 3",
+    "ALTER TABLE guild_settings ADD COLUMN automod_spam_limit INTEGER DEFAULT 5",
 ):
     try:
         DB.execute(_sql); DB.commit()
@@ -451,40 +455,8 @@ async def on_message(message):
     user_id = message.author.id
     guild = message.guild
 
-    if guild and not is_whitelisted(message.author, guild):
-        current_time = datetime.now().timestamp()
-
-        if user_id not in spam_tracking:
-            spam_tracking[user_id] = []
-
-        spam_tracking[user_id] = [
-            t for t in spam_tracking[user_id]
-            if current_time - t < 5
-        ]
-
-        spam_tracking[user_id].append(current_time)
-
-        if len(spam_tracking[user_id]) >= spam_limit:
-            try:
-                duration = timedelta(minutes=5)
-
-                await message.author.timeout(
-                    duration,
-                    reason="Anti-Spam: Sending messages too quickly."
-                )
-
-                spam_tracking[user_id] = []
-
-                warning_msg = await message.channel.send(
-                    f"⚠️ {message.author.mention} has been **timed out for 5 minutes** for spamming."
-                )
-
-                await asyncio.sleep(6)
-                await warning_msg.delete()
-
-            except Exception:
-                pass
-
+    # Anti-spam is handled by the per-guild AutoMod engine below. The old
+    # unconditional timeout path punished members even when AutoMod was off.
 
     # Persistent message statistics + economy: 1 coin per message.
     if guild:
@@ -528,7 +500,7 @@ async def on_message(message):
             history[:] = [(t,c) for t,c in history if now_ts-t<10]
             duplicate_hit = duplicate_enabled and any(c==message.content for _,c in history[-3:]) and bool(message.content.strip())
             history.append((now_ts,message.content))
-            spam_hit = spam_enabled and sum(1 for t,_ in history if now_ts-t<5) >= max(3,spam_limit)
+            spam_hit = spam_enabled and sum(1 for t,_ in history if now_ts-t<5) >= max(3, int(get_guild_setting(guild.id, "automod_spam_limit", spam_limit) or spam_limit))
             if bad_hit or link_hit or caps_hit or mention_hit or invite_hit or length_hit or duplicate_hit or spam_hit:
                 action = get_guild_setting(guild.id,"automod_action","delete") or "delete"
                 try: await message.delete()
@@ -587,20 +559,20 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
 
             current_time = datetime.now().timestamp()
 
-            if executor.id not in nuke_tracking:
-                nuke_tracking[executor.id] = {
+            if (guild.id, executor.id) not in nuke_tracking:
+                nuke_tracking[(guild.id, executor.id)] = {
                     "bans": [],
                     "channels": []
                 }
 
-            nuke_tracking[executor.id]["bans"] = [
-                t for t in nuke_tracking[executor.id]["bans"]
+            nuke_tracking[(guild.id, executor.id)]["bans"] = [
+                t for t in nuke_tracking[(guild.id, executor.id)]["bans"]
                 if current_time - t < 120
             ]
 
-            nuke_tracking[executor.id]["bans"].append(current_time)
+            nuke_tracking[(guild.id, executor.id)]["bans"].append(current_time)
 
-            if len(nuke_tracking[executor.id]["bans"]) >= ban_limit:
+            if len(nuke_tracking[(guild.id, executor.id)]["bans"]) >= int(get_guild_setting(guild.id, "nuke_ban_limit", ban_limit) or ban_limit):
                 await guild.ban(
                     executor,
                     reason="Anti-Nuke Triggered: Mass banning members."
@@ -676,7 +648,7 @@ async def on_member_update(before, after):
 @bot.event
 async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     guild = channel.guild
-    await send_log(guild, "🗑️ Channel Deleted", f"**Channel:** #{channel.name} (`{channel.id}`)", discord.Color.red())
+    await send_log(guild, "🗑️ Channel Deleted", f"**Channel:** #{channel.name} (`{channel.id}`)", discord.Color.red(), "channel")
 
     try:
         async for entry in guild.audit_logs(
@@ -690,20 +662,20 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 
             current_time = datetime.now().timestamp()
 
-            if executor.id not in nuke_tracking:
-                nuke_tracking[executor.id] = {
+            if (guild.id, executor.id) not in nuke_tracking:
+                nuke_tracking[(guild.id, executor.id)] = {
                     "bans": [],
                     "channels": []
                 }
 
-            nuke_tracking[executor.id]["channels"] = [
-                t for t in nuke_tracking[executor.id]["channels"]
+            nuke_tracking[(guild.id, executor.id)]["channels"] = [
+                t for t in nuke_tracking[(guild.id, executor.id)]["channels"]
                 if current_time - t < 120
             ]
 
-            nuke_tracking[executor.id]["channels"].append(current_time)
+            nuke_tracking[(guild.id, executor.id)]["channels"].append(current_time)
 
-            if len(nuke_tracking[executor.id]["channels"]) >= channel_limit:
+            if len(nuke_tracking[(guild.id, executor.id)]["channels"]) >= int(get_guild_setting(guild.id, "nuke_channel_limit", channel_limit) or channel_limit):
                 await guild.ban(
                     executor,
                     reason="Anti-Nuke Triggered: Mass deleting channels."
@@ -802,6 +774,15 @@ async def create_ticket(interaction, panel_id, button_id, button_label, question
     if not guild or not panel:
         return await interaction.followup.send("❌ Ticket panel is no longer available.", ephemeral=True)
 
+    # Prevent duplicate active tickets for the same member.
+    owner_marker = f"agni_ticket_owner={user.id}"
+    legacy_suffix = f"-{user.id}"
+    for existing in guild.text_channels:
+        if owner_marker in (existing.topic or "") or existing.name.endswith(legacy_suffix):
+            return await interaction.followup.send(
+                f"❌ You already have an open ticket: {existing.mention}", ephemeral=True
+            )
+
     category = guild.get_channel(panel.get("category_id"))
     role = guild.get_role(panel.get("role_id")) if panel.get("role_id") else None
     if panel.get("category_id") and category is None:
@@ -817,17 +798,33 @@ async def create_ticket(interaction, panel_id, button_id, button_label, question
         overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, attach_files=True, embed_links=True)
 
     clean = "".join(c for c in user.name.lower() if c.isalnum() or c in "-_") or "user"
+    channel = None
     try:
         me = guild.me or guild.get_member(bot.user.id if bot.user else 0)
         if not me or not me.guild_permissions.manage_channels:
             return await interaction.followup.send("❌ I need **Manage Channels** permission to create tickets.", ephemeral=True)
-        channel = await guild.create_text_channel(name=f"ticket-{clean}-{user.id}"[:95], category=category, overwrites=overwrites, reason=f"Support ticket opened by {user}")
+        topic = f"agni_ticket_owner={user.id};agni_ticket_role={role.id if role else 0};agni_ticket_panel={panel_id}"
+        channel = await guild.create_text_channel(
+            name=f"ticket-{clean}-{user.id}"[:95], category=category,
+            overwrites=overwrites, topic=topic[:1024],
+            reason=f"Support ticket opened by {user}"
+        )
         content = format_ticket_text(panel.get("ticket_open_message", ""), user, role)
         await channel.send(content=content, embed=build_ticket_embed(panel, button_label, user, answers), view=TicketControlView())
     except discord.Forbidden:
+        if channel is not None:
+            try:
+                await channel.delete(reason="Ticket setup failed; cleaning up orphan channel")
+            except discord.HTTPException:
+                pass
         return await interaction.followup.send("❌ Bot needs **Manage Channels** and **Send Messages** permissions.", ephemeral=True)
     except Exception as e:
         print(f"[TICKET CREATE ERROR] {type(e).__name__}: {e}")
+        if channel is not None:
+            try:
+                await channel.delete(reason="Ticket setup failed; cleaning up orphan channel")
+            except discord.HTTPException:
+                pass
         return await interaction.followup.send("❌ Failed to create the ticket. Check category, role and bot permissions.", ephemeral=True)
     await interaction.followup.send(f"✅ Your ticket has been created: {channel.mention}", ephemeral=True)
 
@@ -917,53 +914,149 @@ class CloseTicketModal(discord.ui.Modal, title="Close Ticket"):
     reason = discord.ui.TextInput(label="Closing Reason", placeholder="Why is this ticket being closed?", style=discord.TextStyle.paragraph, required=True, max_length=1000)
 
     async def on_submit(self, interaction):
-        await interaction.response.send_message("🔒 Ticket is being closed. The transcript will be sent by DM if possible.", ephemeral=True)
         channel = interaction.channel
         guild = interaction.guild
         closer = interaction.user
-        close_reason = self.reason.value.strip()
-        messages = [m async for m in channel.history(limit=None, oldest_first=True)]
-        content = (
-            f"Ticket Transcript: #{channel.name}\n"
-            f"Server: {guild.name if guild else 'Unknown'}\n"
-            f"Closed By: {closer} ({closer.id})\n"
-            f"Closed At: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
-            f"Reason: {close_reason}\n\n"
-        )
-        for m in messages:
-            parts = []
-            if m.content:
-                parts.append(m.content)
-            if m.attachments:
-                parts.extend(f"[Attachment] {a.url}" for a in m.attachments)
-            if not parts:
-                parts.append("[Embed/Component]")
-            content += f"[{m.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}] {m.author} ({m.author.id}): {' | '.join(parts)}\n"
-        path = f"transcript_{channel.id}.txt"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
-        file_obj = discord.File(path, filename=f"{channel.name}_transcript.txt")
+        if not guild or not isinstance(channel, discord.TextChannel):
+            return await interaction.response.send_message("❌ This is not a valid ticket channel.", ephemeral=True)
+
+        markers = {}
+        for part in (channel.topic or "").split(";"):
+            if "=" in part:
+                key, value = part.split("=", 1)
+                markers[key.strip()] = value.strip()
+        opener_id = None
         try:
-            await closer.send(content=(f"🔒 **Ticket Closed**\n**Server:** {guild.name}\n**Closed By:** {closer.mention}\n**Reason:** {close_reason}\n\nYour transcript is attached."), file=file_obj)
-        except Exception as e:
-            print(f"[TRANSCRIPT DM ERROR] {e}")
-        try:
-            log_id = get_guild_setting(guild.id, "log_channel_id")
-            if log_id and guild:
-                log_chan = guild.get_channel(int(log_id))
-                if log_chan:
-                    await log_chan.send(content=f"📁 **Closed Ticket:** `#{channel.name}`\n**Closed By:** {closer.mention}\n**Reason:** {close_reason}", file=discord.File(path, filename=f"{channel.name}_transcript.txt"))
-        except Exception as e:
-            print(f"[TRANSCRIPT LOG ERROR] {e}")
-        try:
-            os.remove(path)
-        except Exception:
+            opener_id = int(markers.get("agni_ticket_owner", "0")) or None
+        except (TypeError, ValueError):
             pass
-        await asyncio.sleep(3)
+        if opener_id is None:
+            match = re.search(r"-(\d{15,22})$", channel.name)
+            if match:
+                opener_id = int(match.group(1))
+
+        opener = guild.get_member(opener_id) if opener_id else None
         try:
+            role_id = int(markers.get("agni_ticket_role", "0"))
+        except (TypeError, ValueError):
+            role_id = 0
+        support_role = guild.get_role(role_id) if role_id else None
+        is_opener = opener_id == closer.id
+        is_staff = (
+            closer.guild_permissions.manage_channels
+            or closer.guild_permissions.administrator
+            or (support_role is not None and support_role in getattr(closer, "roles", []))
+        )
+        if not (is_opener or is_staff):
+            return await interaction.response.send_message(
+                "❌ Only the ticket owner or authorized support staff can close this ticket.",
+                ephemeral=True
+            )
+
+        await interaction.response.send_message("🔒 Ticket close process started.", ephemeral=True)
+        close_reason = self.reason.value.strip() or "No reason provided"
+        lines = [
+            f"Ticket Transcript: #{channel.name}",
+            f"Server: {guild.name} ({guild.id})",
+            f"Ticket Owner: {f'{opener} ({opener_id})' if opener else opener_id or 'Unknown'}",
+            f"Closed By: {closer} ({closer.id})",
+            f"Closed At: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            f"Reason: {close_reason}",
+            "",
+        ]
+        try:
+            async for message in channel.history(limit=5000, oldest_first=True):
+                parts = []
+                if message.content:
+                    parts.append(message.content)
+                if message.attachments:
+                    parts.extend(f"[Attachment] {attachment.url}" for attachment in message.attachments)
+                if message.embeds:
+                    parts.append(f"[{len(message.embeds)} embed(s)]")
+                if not parts:
+                    parts.append("[Component/System Message]")
+                lines.append(
+                    f"[{message.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}] "
+                    f"{message.author} ({message.author.id}): {' | '.join(parts)}"
+                )
+        except Exception as error:
+            print(f"[TRANSCRIPT HISTORY ERROR] {type(error).__name__}: {error}")
+            return await interaction.followup.send(
+                "❌ Transcript generation failed. The ticket channel has been kept safe.",
+                ephemeral=True
+            )
+
+        path = f"transcript_{channel.id}.txt"
+        try:
+            with open(path, "w", encoding="utf-8") as transcript_file:
+                transcript_file.write("\n".join(lines))
+
+            # Stay below common Discord upload limits; never remove a ticket
+            # when its transcript cannot be attached safely.
+            if os.path.getsize(path) > 7 * 1024 * 1024:
+                return await interaction.followup.send(
+                    "⚠️ Transcript is larger than the safe upload limit. The ticket has NOT been deleted.",
+                    ephemeral=True
+                )
+
+            delivered = False
+            filename = f"{channel.name}_transcript.txt"
+            if opener is not None:
+                try:
+                    await opener.send(
+                        content=(
+                            f"🔒 **Your ticket has been closed**\n"
+                            f"**Server:** {guild.name}\n"
+                            f"**Closed by:** {closer}\n"
+                            f"**Reason:** {close_reason}\n\nYour transcript is attached."
+                        ),
+                        file=discord.File(path, filename=filename)
+                    )
+                    delivered = True
+                except Exception as error:
+                    print(f"[TRANSCRIPT OPENER DM ERROR] {type(error).__name__}: {error}")
+
+            log_id = (
+                get_guild_setting(guild.id, "ticket_log_channel_id")
+                or get_guild_setting(guild.id, "log_channel_id")
+            )
+            log_channel = guild.get_channel(int(log_id)) if log_id else None
+            if log_channel is not None:
+                try:
+                    await log_channel.send(
+                        content=(
+                            f"Closed Ticket: #{channel.name} ({channel.id})\n"
+                            f"Owner: {opener_id or 'Unknown'}\n"
+                            f"Closed By: {closer}\nReason: {close_reason}"
+                        ),
+                        file=discord.File(path, filename=filename)
+                    )
+                    delivered = True
+                except Exception as error:
+                    print(f"[TRANSCRIPT LOG ERROR] {type(error).__name__}: {error}")
+
+            if not delivered:
+                return await interaction.followup.send(
+                    "⚠️ Transcript delivery failed. The ticket has NOT been deleted; "
+                    "enable the opener's DMs or configure a ticket log channel.",
+                    ephemeral=True
+                )
+
+            await interaction.followup.send("✅ Transcript delivered. Closing ticket…", ephemeral=True)
+            await asyncio.sleep(2)
             await channel.delete(reason=f"Ticket closed by {closer}: {close_reason}")
-        except Exception as e:
-            print(f"[CLOSE ERROR] {e}")
+        except Exception as error:
+            print(f"[TICKET CLOSE ERROR] {type(error).__name__}: {error}")
+            try:
+                await interaction.followup.send("❌ Ticket close failed; the channel was kept where possible.", ephemeral=True)
+            except Exception:
+                pass
+        finally:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
 
 
 class ManagerBaseView(discord.ui.View):
@@ -1621,68 +1714,33 @@ async def backuplist_cmd(ctx):
 )
 @permission_check("administrator")
 @app_permission_check("administrator")
-async def set_ban_limit(
-    ctx: commands.Context,
-    limit: int
-):
-
-    global ban_limit
-
-    ban_limit = limit
-    save_persistent_settings()
-
-    res = (
-        f"✅ **Anti-Nuke Ban Limit updated to:** "
-        f"`{ban_limit}` bans / 2 mins"
-    )
-
-    await ctx.send(res)
-
-
+async def set_ban_limit(ctx: commands.Context, limit: int):
+    if not 2 <= limit <= 100:
+        return await send_mod_result(ctx, "❌ Choose a ban threshold between 2 and 100.", True)
+    set_guild_setting(ctx.guild.id, "nuke_ban_limit", limit)
+    await send_mod_result(ctx, f"✅ Anti-Nuke ban threshold set to **{limit} bans / 2 mins** for this server.")
 @bot.hybrid_command(
     name="set_channel_limit",
     description="Set anti-nuke max channel delete threshold limit."
 )
 @permission_check("administrator")
 @app_permission_check("administrator")
-async def set_channel_limit(
-    ctx: commands.Context,
-    limit: int
-):
-
-    global channel_limit
-
-    channel_limit = limit
-    save_persistent_settings()
-
-    await ctx.send(
-        f"✅ **Anti-Nuke Channel Delete Limit updated to:** "
-        f"`{channel_limit}` channels / 2 mins"
-    )
-
-
+async def set_channel_limit(ctx: commands.Context, limit: int):
+    if not 2 <= limit <= 50:
+        return await send_mod_result(ctx, "❌ Choose a channel-delete threshold between 2 and 50.", True)
+    set_guild_setting(ctx.guild.id, "nuke_channel_limit", limit)
+    await send_mod_result(ctx, f"✅ Anti-Nuke channel threshold set to **{limit} deletions / 2 mins** for this server.")
 @bot.hybrid_command(
     name="set_spam_limit",
     description="Set max allowed messages within 5 seconds before mute."
 )
 @permission_check("administrator")
 @app_permission_check("administrator")
-async def set_spam_limit(
-    ctx: commands.Context,
-    messages_count: int
-):
-
-    global spam_limit
-
-    spam_limit = messages_count
-    save_persistent_settings()
-
-    await ctx.send(
-        f"✅ **Anti-Spam Limit updated to:** "
-        f"`{spam_limit}` msgs / 5 sec"
-    )
-
-
+async def set_spam_limit(ctx: commands.Context, messages_count: int):
+    if not 3 <= messages_count <= 30:
+        return await send_mod_result(ctx, "❌ Choose a spam threshold between 3 and 30 messages.", True)
+    set_guild_setting(ctx.guild.id, "automod_spam_limit", messages_count)
+    await send_mod_result(ctx, f"✅ AutoMod spam threshold set to **{messages_count} messages / 5 sec** for this server.")
 @bot.hybrid_command(
     name="set_prefix",
     description="Set custom prefix for text commands."
@@ -2707,12 +2765,37 @@ async def balance_cmd(ctx,member:discord.Member=None):
 
 @bot.hybrid_command(name="pay",aliases=["p"],description="Pay coins to another member.")
 @app_commands.describe(member="Recipient", amount="Amount")
-async def pay_cmd(ctx,member:discord.Member,amount:int):
-    if member.bot or member.id==ctx.author.id:return await send_mod_result(ctx,"❌ Choose another human member.",True)
-    if amount<=0:return await send_mod_result(ctx,"❌ Amount must be positive.",True)
-    ensure_user(ctx.guild.id,ctx.author.id); ensure_user(ctx.guild.id,member.id); r=DB.execute("SELECT coins FROM user_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,ctx.author.id)).fetchone()
-    if r['coins']<amount:return await send_mod_result(ctx,"❌ Insufficient balance.",True)
-    DB.execute("UPDATE user_stats SET coins=coins-? WHERE guild_id=? AND user_id=?",(amount,ctx.guild.id,ctx.author.id)); DB.execute("UPDATE user_stats SET coins=coins+? WHERE guild_id=? AND user_id=?",(amount,ctx.guild.id,member.id)); DB.commit(); await send_mod_result(ctx,f"💸 {ctx.author.mention} paid **{amount:,}** coins to {member.mention}.")
+async def pay_cmd(ctx, member: discord.Member, amount: int):
+    if member.bot or member.id == ctx.author.id:
+        return await send_mod_result(ctx, "❌ Choose another human member.", True)
+    if amount <= 0:
+        return await send_mod_result(ctx, "❌ Amount must be positive.", True)
+    ensure_user(ctx.guild.id, ctx.author.id)
+    ensure_user(ctx.guild.id, member.id)
+
+    # One SQLite transaction prevents concurrent transfers from spending the
+    # same balance twice. The conditional debit is the final balance check.
+    try:
+        DB.execute("BEGIN IMMEDIATE")
+        debit = DB.execute(
+            "UPDATE user_stats SET coins = coins - ? "
+            "WHERE guild_id = ? AND user_id = ? AND coins >= ?",
+            (amount, ctx.guild.id, ctx.author.id, amount),
+        )
+        if debit.rowcount != 1:
+            DB.rollback()
+            return await send_mod_result(ctx, "❌ Insufficient balance.", True)
+        DB.execute(
+            "UPDATE user_stats SET coins = coins + ? WHERE guild_id = ? AND user_id = ?",
+            (amount, ctx.guild.id, member.id),
+        )
+        DB.commit()
+    except Exception as error:
+        DB.rollback()
+        print(f"[ECONOMY TRANSFER ERROR] {type(error).__name__}: {error}")
+        return await send_mod_result(ctx, "❌ Transfer failed safely. No coins were moved.", True)
+
+    await send_mod_result(ctx, f"💸 {ctx.author.mention} paid **{amount:,}** coins to {member.mention}.")
 
 # Invite statistics
 @bot.hybrid_command(name="inviteleaderboard",aliases=["ilb", "invite_lb", "il"],description="Show the server invite leaderboard.")
