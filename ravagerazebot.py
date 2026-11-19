@@ -181,6 +181,8 @@ try:
 except Exception as e: print(f"[GIVEAWAY DB ERROR] {e}")
 for _sql in (
     "ALTER TABLE guild_settings ADD COLUMN welcome_enabled INTEGER DEFAULT 0",
+    "ALTER TABLE guild_settings ADD COLUMN welcome_channel_id INTEGER",
+    "ALTER TABLE guild_settings ADD COLUMN ticket_log_channel_id INTEGER",
     "ALTER TABLE guild_settings ADD COLUMN welcome_message TEXT",
     "ALTER TABLE guild_settings ADD COLUMN welcome_image TEXT",
     "ALTER TABLE guild_settings ADD COLUMN invite_log_channel_id INTEGER",
@@ -1036,14 +1038,22 @@ class CloseTicketModal(discord.ui.Modal, title="Close Ticket"):
                     print(f"[TRANSCRIPT LOG ERROR] {type(error).__name__}: {error}")
 
             if not delivered:
+                # Transcript delivery is best-effort; it must not block closing.
+                print(f"[TICKET CLOSE] Transcript could not be delivered for channel {channel.id}; proceeding with authorized close.")
+
+            bot_member = guild.me or (guild.get_member(bot.user.id) if bot.user else None)
+            if bot_member is None or not channel.permissions_for(bot_member).manage_channels:
                 return await interaction.followup.send(
-                    "⚠️ Transcript delivery failed. The ticket has NOT been deleted; "
-                    "enable the opener's DMs or configure a ticket log channel.",
+                    "❌ I cannot delete this ticket channel. Give my bot role the Manage Channels permission, then press Close Ticket again.",
                     ephemeral=True
                 )
 
-            await interaction.followup.send("✅ Transcript delivered. Closing ticket…", ephemeral=True)
-            await asyncio.sleep(2)
+            await interaction.followup.send(
+                "✅ Transcript delivered. Closing ticket…" if delivered
+                else "⚠️ Transcript could not be delivered, but the ticket is being closed.",
+                ephemeral=True
+            )
+            await asyncio.sleep(1)
             await channel.delete(reason=f"Ticket closed by {closer}: {close_reason}")
         except Exception as error:
             print(f"[TICKET CLOSE ERROR] {type(error).__name__}: {error}")
@@ -1937,19 +1947,67 @@ async def setup_welcome(
 )
 @permission_check("administrator")
 @app_permission_check("administrator")
-async def disable_welcome(
-    ctx: commands.Context
-):
-
-    global welcome_enabled
-
-    welcome_enabled = False
+async def disable_welcome(ctx: commands.Context):
     set_guild_setting(ctx.guild.id, "welcome_enabled", 0)
-    save_persistent_settings()
+    await send_mod_result(ctx, "❌ **Welcome system has been disabled.**")
 
-    await ctx.send(
-        "❌ **Welcome system has been disabled.**"
-    )
+
+@bot.hybrid_command(name="enable_welcome", description="Enable the configured welcome system.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def enable_welcome_cmd(ctx: commands.Context):
+    channel_id = get_guild_setting(ctx.guild.id, "welcome_channel_id")
+    channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+    if not isinstance(channel, discord.TextChannel):
+        return await send_mod_result(ctx, "❌ Set a welcome channel first with /welcome_channel.")
+    set_guild_setting(ctx.guild.id, "welcome_enabled", 1)
+    await send_mod_result(ctx, f"✅ Welcome messages enabled in {channel.mention}.")
+
+
+@bot.hybrid_command(name="welcome_channel", description="Set the channel for welcome messages.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def welcome_channel_cmd(ctx: commands.Context, channel: discord.TextChannel):
+    set_guild_setting(ctx.guild.id, "welcome_channel_id", channel.id)
+    await send_mod_result(ctx, f"✅ Welcome channel set to {channel.mention}.")
+
+
+@bot.hybrid_command(name="welcome_message", description="Edit the welcome message. Placeholders: user, server, count, inviter.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def welcome_message_cmd(ctx: commands.Context, *, message: str):
+    if len(message) > 1000:
+        return await send_mod_result(ctx, "❌ Welcome message must be 1000 characters or fewer.")
+    set_guild_setting(ctx.guild.id, "welcome_message", message)
+    await send_mod_result(ctx, "✅ Welcome message updated. Placeholders: {user}, {server}, {count}, {inviter}.")
+
+
+@bot.hybrid_command(name="welcome_image", description="Set or clear the welcome embed image URL.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def welcome_image_cmd(ctx: commands.Context, url: str = "none"):
+    value = None if url.lower() in {"none", "off", "clear"} else url.strip()
+    if value and not re.match(r"^https?://", value, re.I):
+        return await send_mod_result(ctx, "❌ Image must be a valid HTTP(S) URL, or use none to clear it.")
+    set_guild_setting(ctx.guild.id, "welcome_image", value)
+    await send_mod_result(ctx, "✅ Welcome image cleared." if value is None else "✅ Welcome image URL updated.")
+
+
+@bot.hybrid_command(name="welcome_status", description="Show the current welcome configuration.")
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def welcome_status_cmd(ctx: commands.Context):
+    enabled = bool(get_guild_setting(ctx.guild.id, "welcome_enabled", 0))
+    channel_id = get_guild_setting(ctx.guild.id, "welcome_channel_id")
+    channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+    message = get_guild_setting(ctx.guild.id, "welcome_message", None) or "Default welcome message"
+    image = get_guild_setting(ctx.guild.id, "welcome_image", None) or "Not set"
+    embed = discord.Embed(title="👋 Welcome Settings", color=discord.Color.green() if enabled else discord.Color.orange())
+    embed.add_field(name="Status", value="Enabled" if enabled else "Disabled", inline=True)
+    embed.add_field(name="Channel", value=channel.mention if channel else "Not set / unavailable", inline=True)
+    embed.add_field(name="Message", value=str(message)[:1024], inline=False)
+    embed.add_field(name="Image URL", value=str(image)[:1024], inline=False)
+    await ctx.send(embed=embed)
 
 
 # =========================================================
@@ -2951,24 +3009,45 @@ async def unlockdown_cmd(ctx):
     set_guild_setting(ctx.guild.id,"lockdown",0); await send_mod_result(ctx,f"🔓 Server lockdown disabled on **{changed}** channels.")
 
 # Complete help menu. Existing module help commands remain available.
-@bot.hybrid_command(name="help",description="Show Agni's all-rounder command menu.")
+@bot.hybrid_command(name="help", description="Show every available Agni command.")
 async def help_cmd(ctx):
-    e=discord.Embed(title="🔥 Agni — All-Rounder Help",description="Use slash commands or the configured prefix. Commands are grouped below.",color=discord.Color.blurple())
-    fields=[
-      ("🛡️ Moderation","`ban` `kick` `unban` `softban` `mute` `removetimeout` `warn` `warnings` `clearwarnings` `history` `purge` `slowmode` `lock` `unlock` `role` `nick`"),
-      ("🎙️ Voice","`deafen` `undeafen` `voicemute` `voiceunmute` `move` `voiceleaderboard`"),
-      ("🚨 Security / AutoMod","`set_ban_limit` `set_channel_limit` `set_spam_limit` `automod` `automod_status` `automod_reset` `raidmode` `setraid` `raidstatus` `raidaction` `lockdown` `unlockdown` `setlog`"),
-      ("🎫 Tickets","`setup_ticket` `edit_ticket` `ticket_log_channel` `set_ticket_ping`"),
-      ("🎉 Giveaways","`giveaway` `reroll` `giveawayfixed` `giveaway_help`"),
-      ("👋 Community","`setup_welcome` `disable_welcome` `setautorole` `setgoodbye` `afk` `suggest` `setsuggestions` `poll` `setupverification` `rolepanel`"),
-      ("📊 Stats","`stats` `messagecount` `leaderboard` `messageleaderboard` `voiceleaderboard` `invites` `inviter` `inviteinfo` `inviteleaderboard` `membercount`"),
-      ("💰 Economy","`balance` `pay` — 1 coin/message + 100 coins/new valid invite"),
-      ("🔎 Information","`serverinfo` `roleinfo` `userinfo` `channelinfo` `avatar` `servericon` `permissions`"),
-      ("⚙️ Admin","`set_prefix` `dmall` `setlog` `setmemberlog` `setmessagelog` `setvclog` `setinvitelog` `setautomodlog` `setchannellog` `setrolelog` `logging`"),
+    # Build help from the live command registry so newly added commands never
+    # silently disappear from the help menu.
+    visible = [
+        command for command in bot.commands
+        if command.name != "help" and not getattr(command, "hidden", False)
     ]
-    for n,v in fields:e.add_field(name=n,value=v,inline=False)
-    e.set_footer(text="Agni • All-rounder Discord bot")
-    await ctx.send(embed=e)
+    visible.sort(key=lambda command: command.name.lower())
+    pages = []
+    current = []
+    for command in visible:
+        description = (
+            getattr(command, "description", None)
+            or getattr(command, "help", None)
+            or "No description provided."
+        )
+        aliases = f" (aliases: {', '.join(command.aliases)})" if command.aliases else ""
+        line = f"**{command.name}**{aliases} — {description.splitlines()[0][:100]}"
+        if current and (len(current) >= 15 or sum(len(item) + 1 for item in current) + len(line) > 950):
+            pages.append(current)
+            current = []
+        current.append(line)
+    if current:
+        pages.append(current)
+
+    if not pages:
+        return await ctx.send("No commands are currently available.")
+
+    for index, page in enumerate(pages, start=1):
+        embed = discord.Embed(
+            title="🔥 Agni — Command Help",
+            description="Use slash commands or the configured prefix. Admin commands require the listed Discord permissions.",
+            color=discord.Color.blurple()
+        )
+        embed.add_field(name=f"Available commands ({index}/{len(pages)})", value="\n".join(page), inline=False)
+        embed.set_footer(text=f"Agni • {len(visible)} commands • Use /help anytime")
+        await ctx.send(embed=embed)
+
 
 # Register persistent verification/role views on startup in addition to ticket views.
 _old_ready = bot.get_cog if False else None

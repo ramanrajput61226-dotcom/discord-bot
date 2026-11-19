@@ -23,13 +23,26 @@ def test_ticket_transcript_targets_opener_not_closer():
     assert "agni_ticket_owner" in close_flow
 
 
-def test_ticket_is_not_deleted_if_transcript_delivery_fails():
+def test_ticket_close_does_not_require_dm_or_log_delivery():
     source = read_source()
     start = source.index("class CloseTicketModal")
     end = source.index("class ManagerBaseView", start)
     close_flow = source[start:end]
-    assert "if not delivered:" in close_flow
-    assert "The ticket has NOT been deleted" in close_flow
+    assert "Transcript delivery is best-effort" in close_flow
+    assert "channel.delete(reason=" in close_flow
+    assert "Manage Channels permission" in close_flow
+
+
+def test_welcome_database_columns_are_migrated():
+    source = read_source()
+    assert 'ADD COLUMN welcome_channel_id INTEGER' in source
+    assert 'ADD COLUMN ticket_log_channel_id INTEGER' in source
+
+
+def test_welcome_has_simple_edit_commands():
+    source = read_source()
+    for command in ("welcome_channel", "welcome_message", "welcome_image", "enable_welcome", "welcome_status"):
+        assert f'name="{command}"' in source
 
 
 def test_failed_ticket_creation_cleans_up_orphan_channel():
@@ -69,3 +82,12 @@ def test_moderation_thresholds_are_per_guild():
     assert 'ADD COLUMN automod_spam_limit INTEGER DEFAULT 5' in source
     assert 'get_guild_setting(guild.id, "nuke_ban_limit", ban_limit)' in source
     assert 'get_guild_setting(guild.id, "nuke_channel_limit", channel_limit)' in source
+
+
+def test_help_menu_is_generated_from_registered_commands():
+    source = read_source()
+    start = source.index('@bot.hybrid_command(name="help"')
+    end = source.index("# Register persistent verification", start)
+    help_flow = source[start:end]
+    assert "for command in bot.commands" in help_flow
+    assert "Available commands" in help_flow
