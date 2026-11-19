@@ -82,3 +82,12 @@ def test_moderation_thresholds_are_per_guild():
     assert 'ADD COLUMN automod_spam_limit INTEGER DEFAULT 5' in source
     assert 'get_guild_setting(guild.id, "nuke_ban_limit", ban_limit)' in source
     assert 'get_guild_setting(guild.id, "nuke_channel_limit", channel_limit)' in source
+
+
+def test_help_menu_is_generated_from_registered_commands():
+    source = read_source()
+    start = source.index('@bot.hybrid_command(name="help"')
+    end = source.index("# Register persistent verification", start)
+    help_flow = source[start:end]
+    assert "for command in bot.commands" in help_flow
+    assert "Available commands" in help_flow
