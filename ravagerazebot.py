@@ -3009,24 +3009,45 @@ async def unlockdown_cmd(ctx):
     set_guild_setting(ctx.guild.id,"lockdown",0); await send_mod_result(ctx,f"🔓 Server lockdown disabled on **{changed}** channels.")
 
 # Complete help menu. Existing module help commands remain available.
-@bot.hybrid_command(name="help",description="Show Agni's all-rounder command menu.")
+@bot.hybrid_command(name="help", description="Show every available Agni command.")
 async def help_cmd(ctx):
-    e=discord.Embed(title="🔥 Agni — All-Rounder Help",description="Use slash commands or the configured prefix. Commands are grouped below.",color=discord.Color.blurple())
-    fields=[
-      ("🛡️ Moderation","`ban` `kick` `unban` `softban` `mute` `removetimeout` `warn` `warnings` `clearwarnings` `history` `purge` `slowmode` `lock` `unlock` `role` `nick`"),
-      ("🎙️ Voice","`deafen` `undeafen` `voicemute` `voiceunmute` `move` `voiceleaderboard`"),
-      ("🚨 Security / AutoMod","`set_ban_limit` `set_channel_limit` `set_spam_limit` `automod` `automod_status` `automod_reset` `raidmode` `setraid` `raidstatus` `raidaction` `lockdown` `unlockdown` `setlog`"),
-      ("🎫 Tickets","`setup_ticket` `edit_ticket` `ticket_log_channel` `set_ticket_ping`"),
-      ("🎉 Giveaways","`giveaway` `reroll` `giveawayfixed` `giveaway_help`"),
-      ("👋 Community","`setup_welcome` `welcome_channel` `welcome_message` `welcome_image` `enable_welcome` `welcome_status` `disable_welcome` `setautorole` `setgoodbye` `afk` `suggest` `setsuggestions` `poll` `setupverification` `rolepanel`"),
-      ("📊 Stats","`stats` `messagecount` `leaderboard` `messageleaderboard` `voiceleaderboard` `invites` `inviter` `inviteinfo` `inviteleaderboard` `membercount`"),
-      ("💰 Economy","`balance` `pay` — 1 coin/message + 100 coins/new valid invite"),
-      ("🔎 Information","`serverinfo` `roleinfo` `userinfo` `channelinfo` `avatar` `servericon` `permissions`"),
-      ("⚙️ Admin","`set_prefix` `dmall` `setlog` `setmemberlog` `setmessagelog` `setvclog` `setinvitelog` `setautomodlog` `setchannellog` `setrolelog` `logging`"),
+    # Build help from the live command registry so newly added commands never
+    # silently disappear from the help menu.
+    visible = [
+        command for command in bot.commands
+        if command.name != "help" and not getattr(command, "hidden", False)
     ]
-    for n,v in fields:e.add_field(name=n,value=v,inline=False)
-    e.set_footer(text="Agni • All-rounder Discord bot")
-    await ctx.send(embed=e)
+    visible.sort(key=lambda command: command.name.lower())
+    pages = []
+    current = []
+    for command in visible:
+        description = (
+            getattr(command, "description", None)
+            or getattr(command, "help", None)
+            or "No description provided."
+        )
+        aliases = f" (aliases: {', '.join(command.aliases)})" if command.aliases else ""
+        line = f"**{command.name}**{aliases} — {description.splitlines()[0][:100]}"
+        if current and (len(current) >= 15 or sum(len(item) + 1 for item in current) + len(line) > 3800):
+            pages.append(current)
+            current = []
+        current.append(line)
+    if current:
+        pages.append(current)
+
+    if not pages:
+        return await ctx.send("No commands are currently available.")
+
+    for index, page in enumerate(pages, start=1):
+        embed = discord.Embed(
+            title="🔥 Agni — Command Help",
+            description="Use slash commands or the configured prefix. Admin commands require the listed Discord permissions.",
+            color=discord.Color.blurple()
+        )
+        embed.add_field(name=f"Available commands ({index}/{len(pages)})", value="\n".join(page), inline=False)
+        embed.set_footer(text=f"Agni • {len(visible)} commands • Use /help anytime")
+        await ctx.send(embed=embed)
+
 
 # Register persistent verification/role views on startup in addition to ticket views.
 _old_ready = bot.get_cog if False else None
