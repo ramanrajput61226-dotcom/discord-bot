@@ -198,6 +198,9 @@ for _sql in (
     "ALTER TABLE guild_settings ADD COLUMN raid_threshold INTEGER DEFAULT 5",
     "ALTER TABLE guild_settings ADD COLUMN raid_window INTEGER DEFAULT 10",
     "ALTER TABLE guild_settings ADD COLUMN raid_action TEXT DEFAULT 'lockdown'",
+    "ALTER TABLE guild_settings ADD COLUMN nuke_ban_limit INTEGER DEFAULT 5",
+    "ALTER TABLE guild_settings ADD COLUMN nuke_channel_limit INTEGER DEFAULT 3",
+    "ALTER TABLE guild_settings ADD COLUMN automod_spam_limit INTEGER DEFAULT 5",
 ):
     try:
         DB.execute(_sql); DB.commit()
@@ -497,7 +500,7 @@ async def on_message(message):
             history[:] = [(t,c) for t,c in history if now_ts-t<10]
             duplicate_hit = duplicate_enabled and any(c==message.content for _,c in history[-3:]) and bool(message.content.strip())
             history.append((now_ts,message.content))
-            spam_hit = spam_enabled and sum(1 for t,_ in history if now_ts-t<5) >= max(3,spam_limit)
+            spam_hit = spam_enabled and sum(1 for t,_ in history if now_ts-t<5) >= max(3, int(get_guild_setting(guild.id, "automod_spam_limit", spam_limit) or spam_limit))
             if bad_hit or link_hit or caps_hit or mention_hit or invite_hit or length_hit or duplicate_hit or spam_hit:
                 action = get_guild_setting(guild.id,"automod_action","delete") or "delete"
                 try: await message.delete()
@@ -569,7 +572,7 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
 
             nuke_tracking[(guild.id, executor.id)]["bans"].append(current_time)
 
-            if len(nuke_tracking[(guild.id, executor.id)]["bans"]) >= ban_limit:
+            if len(nuke_tracking[(guild.id, executor.id)]["bans"]) >= int(get_guild_setting(guild.id, "nuke_ban_limit", ban_limit) or ban_limit):
                 await guild.ban(
                     executor,
                     reason="Anti-Nuke Triggered: Mass banning members."
@@ -672,7 +675,7 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 
             nuke_tracking[(guild.id, executor.id)]["channels"].append(current_time)
 
-            if len(nuke_tracking[(guild.id, executor.id)]["channels"]) >= channel_limit:
+            if len(nuke_tracking[(guild.id, executor.id)]["channels"]) >= int(get_guild_setting(guild.id, "nuke_channel_limit", channel_limit) or channel_limit):
                 await guild.ban(
                     executor,
                     reason="Anti-Nuke Triggered: Mass deleting channels."
@@ -1711,68 +1714,33 @@ async def backuplist_cmd(ctx):
 )
 @permission_check("administrator")
 @app_permission_check("administrator")
-async def set_ban_limit(
-    ctx: commands.Context,
-    limit: int
-):
-
-    global ban_limit
-
-    ban_limit = limit
-    save_persistent_settings()
-
-    res = (
-        f"✅ **Anti-Nuke Ban Limit updated to:** "
-        f"`{ban_limit}` bans / 2 mins"
-    )
-
-    await ctx.send(res)
-
-
+async def set_ban_limit(ctx: commands.Context, limit: int):
+    if not 2 <= limit <= 100:
+        return await send_mod_result(ctx, "❌ Choose a ban threshold between 2 and 100.", True)
+    set_guild_setting(ctx.guild.id, "nuke_ban_limit", limit)
+    await send_mod_result(ctx, f"✅ Anti-Nuke ban threshold set to **{limit} bans / 2 mins** for this server.")
 @bot.hybrid_command(
     name="set_channel_limit",
     description="Set anti-nuke max channel delete threshold limit."
 )
 @permission_check("administrator")
 @app_permission_check("administrator")
-async def set_channel_limit(
-    ctx: commands.Context,
-    limit: int
-):
-
-    global channel_limit
-
-    channel_limit = limit
-    save_persistent_settings()
-
-    await ctx.send(
-        f"✅ **Anti-Nuke Channel Delete Limit updated to:** "
-        f"`{channel_limit}` channels / 2 mins"
-    )
-
-
+async def set_channel_limit(ctx: commands.Context, limit: int):
+    if not 2 <= limit <= 50:
+        return await send_mod_result(ctx, "❌ Choose a channel-delete threshold between 2 and 50.", True)
+    set_guild_setting(ctx.guild.id, "nuke_channel_limit", limit)
+    await send_mod_result(ctx, f"✅ Anti-Nuke channel threshold set to **{limit} deletions / 2 mins** for this server.")
 @bot.hybrid_command(
     name="set_spam_limit",
     description="Set max allowed messages within 5 seconds before mute."
 )
 @permission_check("administrator")
 @app_permission_check("administrator")
-async def set_spam_limit(
-    ctx: commands.Context,
-    messages_count: int
-):
-
-    global spam_limit
-
-    spam_limit = messages_count
-    save_persistent_settings()
-
-    await ctx.send(
-        f"✅ **Anti-Spam Limit updated to:** "
-        f"`{spam_limit}` msgs / 5 sec"
-    )
-
-
+async def set_spam_limit(ctx: commands.Context, messages_count: int):
+    if not 3 <= messages_count <= 30:
+        return await send_mod_result(ctx, "❌ Choose a spam threshold between 3 and 30 messages.", True)
+    set_guild_setting(ctx.guild.id, "automod_spam_limit", messages_count)
+    await send_mod_result(ctx, f"✅ AutoMod spam threshold set to **{messages_count} messages / 5 sec** for this server.")
 @bot.hybrid_command(
     name="set_prefix",
     description="Set custom prefix for text commands."
