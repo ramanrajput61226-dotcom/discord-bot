@@ -2796,12 +2796,37 @@ async def balance_cmd(ctx,member:discord.Member=None):
 
 @bot.hybrid_command(name="pay",aliases=["p"],description="Pay coins to another member.")
 @app_commands.describe(member="Recipient", amount="Amount")
-async def pay_cmd(ctx,member:discord.Member,amount:int):
-    if member.bot or member.id==ctx.author.id:return await send_mod_result(ctx,"❌ Choose another human member.",True)
-    if amount<=0:return await send_mod_result(ctx,"❌ Amount must be positive.",True)
-    ensure_user(ctx.guild.id,ctx.author.id); ensure_user(ctx.guild.id,member.id); r=DB.execute("SELECT coins FROM user_stats WHERE guild_id=? AND user_id=?",(ctx.guild.id,ctx.author.id)).fetchone()
-    if r['coins']<amount:return await send_mod_result(ctx,"❌ Insufficient balance.",True)
-    DB.execute("UPDATE user_stats SET coins=coins-? WHERE guild_id=? AND user_id=?",(amount,ctx.guild.id,ctx.author.id)); DB.execute("UPDATE user_stats SET coins=coins+? WHERE guild_id=? AND user_id=?",(amount,ctx.guild.id,member.id)); DB.commit(); await send_mod_result(ctx,f"💸 {ctx.author.mention} paid **{amount:,}** coins to {member.mention}.")
+async def pay_cmd(ctx, member: discord.Member, amount: int):
+    if member.bot or member.id == ctx.author.id:
+        return await send_mod_result(ctx, "❌ Choose another human member.", True)
+    if amount <= 0:
+        return await send_mod_result(ctx, "❌ Amount must be positive.", True)
+    ensure_user(ctx.guild.id, ctx.author.id)
+    ensure_user(ctx.guild.id, member.id)
+
+    # One SQLite transaction prevents concurrent transfers from spending the
+    # same balance twice. The conditional debit is the final balance check.
+    try:
+        DB.execute("BEGIN IMMEDIATE")
+        debit = DB.execute(
+            "UPDATE user_stats SET coins = coins - ? "
+            "WHERE guild_id = ? AND user_id = ? AND coins >= ?",
+            (amount, ctx.guild.id, ctx.author.id, amount),
+        )
+        if debit.rowcount != 1:
+            DB.rollback()
+            return await send_mod_result(ctx, "❌ Insufficient balance.", True)
+        DB.execute(
+            "UPDATE user_stats SET coins = coins + ? WHERE guild_id = ? AND user_id = ?",
+            (amount, ctx.guild.id, member.id),
+        )
+        DB.commit()
+    except Exception as error:
+        DB.rollback()
+        print(f"[ECONOMY TRANSFER ERROR] {type(error).__name__}: {error}")
+        return await send_mod_result(ctx, "❌ Transfer failed safely. No coins were moved.", True)
+
+    await send_mod_result(ctx, f"💸 {ctx.author.mention} paid **{amount:,}** coins to {member.mention}.")
 
 # Invite statistics
 @bot.hybrid_command(name="inviteleaderboard",aliases=["ilb", "invite_lb", "il"],description="Show the server invite leaderboard.")
