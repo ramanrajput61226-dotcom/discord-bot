@@ -451,40 +451,8 @@ async def on_message(message):
     user_id = message.author.id
     guild = message.guild
 
-    if guild and not is_whitelisted(message.author, guild):
-        current_time = datetime.now().timestamp()
-
-        if user_id not in spam_tracking:
-            spam_tracking[user_id] = []
-
-        spam_tracking[user_id] = [
-            t for t in spam_tracking[user_id]
-            if current_time - t < 5
-        ]
-
-        spam_tracking[user_id].append(current_time)
-
-        if len(spam_tracking[user_id]) >= spam_limit:
-            try:
-                duration = timedelta(minutes=5)
-
-                await message.author.timeout(
-                    duration,
-                    reason="Anti-Spam: Sending messages too quickly."
-                )
-
-                spam_tracking[user_id] = []
-
-                warning_msg = await message.channel.send(
-                    f"⚠️ {message.author.mention} has been **timed out for 5 minutes** for spamming."
-                )
-
-                await asyncio.sleep(6)
-                await warning_msg.delete()
-
-            except Exception:
-                pass
-
+    # Anti-spam is handled by the per-guild AutoMod engine below. The old
+    # unconditional timeout path punished members even when AutoMod was off.
 
     # Persistent message statistics + economy: 1 coin per message.
     if guild:
@@ -587,8 +555,8 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
 
             current_time = datetime.now().timestamp()
 
-            if executor.id not in nuke_tracking:
-                nuke_tracking[executor.id] = {
+            if (guild.id, executor.id) not in nuke_tracking:
+                nuke_tracking[(guild.id, executor.id)] = {
                     "bans": [],
                     "channels": []
                 }
@@ -676,7 +644,7 @@ async def on_member_update(before, after):
 @bot.event
 async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     guild = channel.guild
-    await send_log(guild, "🗑️ Channel Deleted", f"**Channel:** #{channel.name} (`{channel.id}`)", discord.Color.red())
+    await send_log(guild, "🗑️ Channel Deleted", f"**Channel:** #{channel.name} (`{channel.id}`)", discord.Color.red(), "channel")
 
     try:
         async for entry in guild.audit_logs(
