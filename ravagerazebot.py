@@ -802,6 +802,15 @@ async def create_ticket(interaction, panel_id, button_id, button_label, question
     if not guild or not panel:
         return await interaction.followup.send("❌ Ticket panel is no longer available.", ephemeral=True)
 
+    # Prevent duplicate active tickets for the same member.
+    owner_marker = f"agni_ticket_owner={user.id}"
+    legacy_suffix = f"-{user.id}"
+    for existing in guild.text_channels:
+        if owner_marker in (existing.topic or "") or existing.name.endswith(legacy_suffix):
+            return await interaction.followup.send(
+                f"❌ You already have an open ticket: {existing.mention}", ephemeral=True
+            )
+
     category = guild.get_channel(panel.get("category_id"))
     role = guild.get_role(panel.get("role_id")) if panel.get("role_id") else None
     if panel.get("category_id") and category is None:
@@ -821,7 +830,12 @@ async def create_ticket(interaction, panel_id, button_id, button_label, question
         me = guild.me or guild.get_member(bot.user.id if bot.user else 0)
         if not me or not me.guild_permissions.manage_channels:
             return await interaction.followup.send("❌ I need **Manage Channels** permission to create tickets.", ephemeral=True)
-        channel = await guild.create_text_channel(name=f"ticket-{clean}-{user.id}"[:95], category=category, overwrites=overwrites, reason=f"Support ticket opened by {user}")
+        topic = f"agni_ticket_owner={user.id};agni_ticket_role={role.id if role else 0};agni_ticket_panel={panel_id}"
+        channel = await guild.create_text_channel(
+            name=f"ticket-{clean}-{user.id}"[:95], category=category,
+            overwrites=overwrites, topic=topic[:1024],
+            reason=f"Support ticket opened by {user}"
+        )
         content = format_ticket_text(panel.get("ticket_open_message", ""), user, role)
         await channel.send(content=content, embed=build_ticket_embed(panel, button_label, user, answers), view=TicketControlView())
     except discord.Forbidden:
@@ -917,53 +931,141 @@ class CloseTicketModal(discord.ui.Modal, title="Close Ticket"):
     reason = discord.ui.TextInput(label="Closing Reason", placeholder="Why is this ticket being closed?", style=discord.TextStyle.paragraph, required=True, max_length=1000)
 
     async def on_submit(self, interaction):
-        await interaction.response.send_message("🔒 Ticket is being closed. The transcript will be sent by DM if possible.", ephemeral=True)
         channel = interaction.channel
         guild = interaction.guild
         closer = interaction.user
-        close_reason = self.reason.value.strip()
-        messages = [m async for m in channel.history(limit=None, oldest_first=True)]
-        content = (
-            f"Ticket Transcript: #{channel.name}\n"
-            f"Server: {guild.name if guild else 'Unknown'}\n"
-            f"Closed By: {closer} ({closer.id})\n"
-            f"Closed At: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
-            f"Reason: {close_reason}\n\n"
-        )
-        for m in messages:
-            parts = []
-            if m.content:
-                parts.append(m.content)
-            if m.attachments:
-                parts.extend(f"[Attachment] {a.url}" for a in m.attachments)
-            if not parts:
-                parts.append("[Embed/Component]")
-            content += f"[{m.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}] {m.author} ({m.author.id}): {' | '.join(parts)}\n"
-        path = f"transcript_{channel.id}.txt"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
-        file_obj = discord.File(path, filename=f"{channel.name}_transcript.txt")
+        if not guild or not isinstance(channel, discord.TextChannel):
+            return await interaction.response.send_message("❌ This is not a valid ticket channel.", ephemeral=True)
+
+        markers = {}
+        for part in (channel.topic or "").split(";"):
+            if "=" in part:
+                key, value = part.split("=", 1)
+                markers[key.strip()] = value.strip()
+        opener_id = None
         try:
-            await closer.send(content=(f"🔒 **Ticket Closed**\n**Server:** {guild.name}\n**Closed By:** {closer.mention}\n**Reason:** {close_reason}\n\nYour transcript is attached."), file=file_obj)
-        except Exception as e:
-            print(f"[TRANSCRIPT DM ERROR] {e}")
-        try:
-            log_id = get_guild_setting(guild.id, "log_channel_id")
-            if log_id and guild:
-                log_chan = guild.get_channel(int(log_id))
-                if log_chan:
-                    await log_chan.send(content=f"📁 **Closed Ticket:** `#{channel.name}`\n**Closed By:** {closer.mention}\n**Reason:** {close_reason}", file=discord.File(path, filename=f"{channel.name}_transcript.txt"))
-        except Exception as e:
-            print(f"[TRANSCRIPT LOG ERROR] {e}")
-        try:
-            os.remove(path)
-        except Exception:
+            opener_id = int(markers.get("agni_ticket_owner", "0")) or None
+        except (TypeError, ValueError):
             pass
-        await asyncio.sleep(3)
+        if opener_id is None:
+            match = re.search(r"-(\d{15,22})$", channel.name)
+            if match:
+                opener_id = int(match.group(1))
+
+        opener = guild.get_member(opener_id) if opener_id else None
         try:
+            role_id = int(markers.get("agni_ticket_role", "0"))
+        except (TypeError, ValueError):
+            role_id = 0
+        support_role = guild.get_role(role_id) if role_id else None
+        is_opener = opener_id == closer.id
+        is_staff = (
+            closer.guild_permissions.manage_channels
+            or closer.guild_permissions.administrator
+            or (support_role is not None and support_role in getattr(closer, "roles", []))
+        )
+        if not (is_opener or is_staff):
+            return await interaction.response.send_message(
+                "❌ Only the ticket owner or authorized support staff can close this ticket.",
+                ephemeral=True
+            )
+
+        await interaction.response.send_message("🔒 Ticket close process started.", ephemeral=True)
+        close_reason = self.reason.value.strip() or "No reason provided"
+        lines = [
+            f"Ticket Transcript: #{channel.name}",
+            f"Server: {guild.name} ({guild.id})",
+            f"Ticket Owner: {f'{opener} ({opener_id})' if opener else opener_id or 'Unknown'}",
+            f"Closed By: {closer} ({closer.id})",
+            f"Closed At: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            f"Reason: {close_reason}",
+            "",
+        ]
+        try:
+            async for message in channel.history(limit=None, oldest_first=True):
+                parts = []
+                if message.content:
+                    parts.append(message.content)
+                if message.attachments:
+                    parts.extend(f"[Attachment] {attachment.url}" for attachment in message.attachments)
+                if message.embeds:
+                    parts.append(f"[{len(message.embeds)} embed(s)]")
+                if not parts:
+                    parts.append("[Component/System Message]")
+                lines.append(
+                    f"[{message.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}] "
+                    f"{message.author} ({message.author.id}): {' | '.join(parts)}"
+                )
+        except Exception as error:
+            print(f"[TRANSCRIPT HISTORY ERROR] {type(error).__name__}: {error}")
+            return await interaction.followup.send(
+                "❌ Transcript generation failed. The ticket channel has been kept safe.",
+                ephemeral=True
+            )
+
+        path = f"transcript_{channel.id}.txt"
+        try:
+            with open(path, "w", encoding="utf-8") as transcript_file:
+                transcript_file.write("\n".join(lines))
+
+            delivered = False
+            filename = f"{channel.name}_transcript.txt"
+            if opener is not None:
+                try:
+                    await opener.send(
+                        content=(
+                            f"🔒 **Your ticket has been closed**\n"
+                            f"**Server:** {guild.name}\n"
+                            f"**Closed by:** {closer}\n"
+                            f"**Reason:** {close_reason}\n\nYour transcript is attached."
+                        ),
+                        file=discord.File(path, filename=filename)
+                    )
+                    delivered = True
+                except Exception as error:
+                    print(f"[TRANSCRIPT OPENER DM ERROR] {type(error).__name__}: {error}")
+
+            log_id = (
+                get_guild_setting(guild.id, "ticket_log_channel_id")
+                or get_guild_setting(guild.id, "log_channel_id")
+            )
+            log_channel = guild.get_channel(int(log_id)) if log_id else None
+            if log_channel is not None:
+                try:
+                    await log_channel.send(
+                        content=(
+                            f"Closed Ticket: #{channel.name} ({channel.id})\n"
+                            f"Owner: {opener_id or 'Unknown'}\n"
+                            f"Closed By: {closer}\nReason: {close_reason}"
+                        ),
+                        file=discord.File(path, filename=filename)
+                    )
+                    delivered = True
+                except Exception as error:
+                    print(f"[TRANSCRIPT LOG ERROR] {type(error).__name__}: {error}")
+
+            if not delivered:
+                return await interaction.followup.send(
+                    "⚠️ Transcript delivery failed. The ticket has NOT been deleted; "
+                    "enable the opener's DMs or configure a ticket log channel.",
+                    ephemeral=True
+                )
+
+            await interaction.followup.send("✅ Transcript delivered. Closing ticket…", ephemeral=True)
+            await asyncio.sleep(2)
             await channel.delete(reason=f"Ticket closed by {closer}: {close_reason}")
-        except Exception as e:
-            print(f"[CLOSE ERROR] {e}")
+        except Exception as error:
+            print(f"[TICKET CLOSE ERROR] {type(error).__name__}: {error}")
+            try:
+                await interaction.followup.send("❌ Ticket close failed; the channel was kept where possible.", ephemeral=True)
+            except Exception:
+                pass
+        finally:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
 
 
 class ManagerBaseView(discord.ui.View):
