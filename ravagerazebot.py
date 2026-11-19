@@ -794,6 +794,7 @@ async def create_ticket(interaction, panel_id, button_id, button_label, question
         overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, attach_files=True, embed_links=True)
 
     clean = "".join(c for c in user.name.lower() if c.isalnum() or c in "-_") or "user"
+    channel = None
     try:
         me = guild.me or guild.get_member(bot.user.id if bot.user else 0)
         if not me or not me.guild_permissions.manage_channels:
@@ -807,9 +808,19 @@ async def create_ticket(interaction, panel_id, button_id, button_label, question
         content = format_ticket_text(panel.get("ticket_open_message", ""), user, role)
         await channel.send(content=content, embed=build_ticket_embed(panel, button_label, user, answers), view=TicketControlView())
     except discord.Forbidden:
+        if channel is not None:
+            try:
+                await channel.delete(reason="Ticket setup failed; cleaning up orphan channel")
+            except discord.HTTPException:
+                pass
         return await interaction.followup.send("❌ Bot needs **Manage Channels** and **Send Messages** permissions.", ephemeral=True)
     except Exception as e:
         print(f"[TICKET CREATE ERROR] {type(e).__name__}: {e}")
+        if channel is not None:
+            try:
+                await channel.delete(reason="Ticket setup failed; cleaning up orphan channel")
+            except discord.HTTPException:
+                pass
         return await interaction.followup.send("❌ Failed to create the ticket. Check category, role and bot permissions.", ephemeral=True)
     await interaction.followup.send(f"✅ Your ticket has been created: {channel.mention}", ephemeral=True)
 
@@ -950,7 +961,7 @@ class CloseTicketModal(discord.ui.Modal, title="Close Ticket"):
             "",
         ]
         try:
-            async for message in channel.history(limit=None, oldest_first=True):
+            async for message in channel.history(limit=5000, oldest_first=True):
                 parts = []
                 if message.content:
                     parts.append(message.content)
@@ -975,6 +986,14 @@ class CloseTicketModal(discord.ui.Modal, title="Close Ticket"):
         try:
             with open(path, "w", encoding="utf-8") as transcript_file:
                 transcript_file.write("\n".join(lines))
+
+            # Stay below common Discord upload limits; never remove a ticket
+            # when its transcript cannot be attached safely.
+            if os.path.getsize(path) > 7 * 1024 * 1024:
+                return await interaction.followup.send(
+                    "⚠️ Transcript is larger than the safe upload limit. The ticket has NOT been deleted.",
+                    ephemeral=True
+                )
 
             delivered = False
             filename = f"{channel.name}_transcript.txt"
