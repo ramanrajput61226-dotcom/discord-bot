@@ -562,13 +562,13 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
                 }
 
             nuke_tracking[(guild.id, executor.id)]["bans"] = [
-                t for t in nuke_tracking[executor.id]["bans"]
+                t for t in nuke_tracking[(guild.id, executor.id)]["bans"]
                 if current_time - t < 120
             ]
 
-            nuke_tracking[executor.id]["bans"].append(current_time)
+            nuke_tracking[(guild.id, executor.id)]["bans"].append(current_time)
 
-            if len(nuke_tracking[executor.id]["bans"]) >= ban_limit:
+            if len(nuke_tracking[(guild.id, executor.id)]["bans"]) >= ban_limit:
                 await guild.ban(
                     executor,
                     reason="Anti-Nuke Triggered: Mass banning members."
@@ -659,19 +659,19 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
             current_time = datetime.now().timestamp()
 
             if (guild.id, executor.id) not in nuke_tracking:
-                nuke_tracking[executor.id] = {
+                nuke_tracking[(guild.id, executor.id)] = {
                     "bans": [],
                     "channels": []
                 }
 
-            nuke_tracking[executor.id]["channels"] = [
-                t for t in nuke_tracking[executor.id]["channels"]
+            nuke_tracking[(guild.id, executor.id)]["channels"] = [
+                t for t in nuke_tracking[(guild.id, executor.id)]["channels"]
                 if current_time - t < 120
             ]
 
-            nuke_tracking[executor.id]["channels"].append(current_time)
+            nuke_tracking[(guild.id, executor.id)]["channels"].append(current_time)
 
-            if len(nuke_tracking[executor.id]["channels"]) >= channel_limit:
+            if len(nuke_tracking[(guild.id, executor.id)]["channels"]) >= channel_limit:
                 await guild.ban(
                     executor,
                     reason="Anti-Nuke Triggered: Mass deleting channels."
