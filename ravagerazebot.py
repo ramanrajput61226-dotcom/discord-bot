@@ -561,7 +561,7 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
                     "channels": []
                 }
 
-            nuke_tracking[executor.id]["bans"] = [
+            nuke_tracking[(guild.id, executor.id)]["bans"] = [
                 t for t in nuke_tracking[executor.id]["bans"]
                 if current_time - t < 120
             ]
@@ -658,7 +658,7 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 
             current_time = datetime.now().timestamp()
 
-            if executor.id not in nuke_tracking:
+            if (guild.id, executor.id) not in nuke_tracking:
                 nuke_tracking[executor.id] = {
                     "bans": [],
                     "channels": []
