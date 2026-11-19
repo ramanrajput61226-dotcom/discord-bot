@@ -40,3 +40,7 @@ GitHub Actions runs syntax and regression checks on pushes to `main`/the upgrade
 - Enable required privileged intents in the Developer Portal.
 - Use a process manager/hosting platform to restart the bot after crashes.
 - Review moderation permissions and thresholds before enabling enforcement in a live server.
+
+
+## Database privacy
+The SQLite database and server settings are created at runtime and must never be committed or embedded in source code. Keep the database on a private persistent disk/volume, restrict access to it, and maintain private backups outside Git. A fresh installation starts with an empty database and initializes its schema automatically.
