@@ -36,7 +36,7 @@ h1{font-size:clamp(42px,8vw,72px);letter-spacing:-.06em;line-height:1;margin:38p
 <h1>Built to<br><span style="color:#a78bfa">moderate.</span></h1><p class="sub">A multi-purpose Discord community bot for moderation, tickets, giveaways, welcome tools and server protection.</p>
 <section class="panel"><div class="status"><span id="dot" class="dot"></span><span id="status">Checking Discord connection…</span></div>
 <div class="grid"><div class="metric"><small>Servers</small><strong id="guilds">—</strong></div><div class="metric"><small>Gateway latency</small><strong id="latency">—</strong></div><div class="metric"><small>Process uptime</small><strong id="uptime">—</strong></div><div class="metric"><small>Last connected</small><strong id="lastready">—</strong></div></div>
-<div class="pill">Auto-refreshes every 15 seconds</div></section><div class="foot">Agni Discord Bot · <a style="color:#a78bfa" href="/api/status">Live status API</a></div></main>
+<div class="pill">Auto-refreshes every 15 seconds</div></section><div class="foot">Agni Discord Bot · <a style="color:#a78bfa" href="/api/status">Live status API</a> · <a style="color:#a78bfa;font-weight:700" href="/dashboard">Open Control Panel →</a></div></main>
 <script>
 const $=id=>document.getElementById(id);
 function duration(s){s=Math.max(0,Math.floor(s));let d=Math.floor(s/86400);s%=86400;let h=Math.floor(s/3600);s%=3600;let m=Math.floor(s/60);return d?d+"d "+h+"h":h?h+"h "+m+"m":m+"m "+s+"s"}

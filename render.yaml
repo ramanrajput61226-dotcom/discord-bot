@@ -9,6 +9,12 @@ services:
     envVars:
       - key: DISCORD_TOKEN
         sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DASHBOARD_SECRET_KEY
+        generateValue: true
       - key: AGNI_DB_PATH
         value: /var/data/agni_data.sqlite3
       - key: AGNI_CONFIG_PATH
