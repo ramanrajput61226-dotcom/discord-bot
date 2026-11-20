@@ -99,3 +99,30 @@ def test_live_database_backups_are_not_embedded_in_source():
     assert "_BACKUP_DB_B64" not in source
     assert "_BACKUP_CONFIG_B64" not in source
     assert "restore_supplied_backup_if_missing" not in source
+
+
+def test_giveaways_persist_end_time_and_resume_after_restart():
+    source = read_source()
+    assert "ends_at TEXT" in source
+    assert 'ALTER TABLE giveaways ADD COLUMN ends_at TEXT' in source
+    assert "@tasks.loop(seconds=15)" in source
+    assert "giveaway_recovery_task.start()" in source
+    start = source.index("# GIVEAWAY — PERSISTENT, RESTART-SAFE")
+    end = source.index("# RAID PROTECTION", start)
+    giveaway_flow = source[start:end]
+    assert "await asyncio.sleep(seconds)" not in giveaway_flow
+    assert "ends_at<=?" in giveaway_flow
+    assert "async def finish_giveaway" in giveaway_flow
+
+
+def test_fixed_winner_tool_is_owner_only_test_mode_and_hidden():
+    source = read_source()
+    start = source.index('@bot.command(name="giveawaytest")')
+    end = source.index('@bot.hybrid_command(name="reroll"', start)
+    test_command = source[start:end]
+    assert "ctx.author.id != OWNER_ID" in test_command
+    assert "test_mode" in test_command
+    assert "TEST GIVEAWAY — NO REAL PRIZE" in test_command
+    assert "giveaway_test_cmd.hidden = True" in test_command
+    assert "giveawayfixed" not in source
+    assert "Fixed winner:" not in source
