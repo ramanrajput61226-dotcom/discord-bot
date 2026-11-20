@@ -139,11 +139,14 @@ try:
         message_id INTEGER PRIMARY KEY, guild_id INTEGER NOT NULL, channel_id INTEGER NOT NULL,
         prize TEXT NOT NULL, winners_count INTEGER NOT NULL, host_id INTEGER NOT NULL,
         fixed_winner_id INTEGER, ended INTEGER DEFAULT 0, participants TEXT DEFAULT '[]',
-        winners TEXT DEFAULT '[]', created_at TEXT NOT NULL, ended_at TEXT
+        winners TEXT DEFAULT '[]', created_at TEXT NOT NULL, ended_at TEXT,
+        ends_at TEXT, test_mode INTEGER DEFAULT 0
     )""")
     DB.commit()
 except Exception as e: print(f"[GIVEAWAY DB ERROR] {e}")
 for _sql in (
+    "ALTER TABLE giveaways ADD COLUMN ends_at TEXT",
+    "ALTER TABLE giveaways ADD COLUMN test_mode INTEGER DEFAULT 0",
     "ALTER TABLE guild_settings ADD COLUMN welcome_enabled INTEGER DEFAULT 0",
     "ALTER TABLE guild_settings ADD COLUMN welcome_channel_id INTEGER",
     "ALTER TABLE guild_settings ADD COLUMN ticket_log_channel_id INTEGER",
@@ -398,6 +401,9 @@ async def on_ready():
             print(f" [Invite Cache] Cached invites for guild: {guild.name}")
         except Exception as e:
             print(f" [Invite Cache] Could not cache invites for {guild.name}: {e}")
+
+    if not giveaway_recovery_task.is_running():
+        giveaway_recovery_task.start()
 
     global backup_task_started
     if not backup_task_started:
@@ -1330,211 +1336,215 @@ async def edit_ticket(ctx: commands.Context):
 
 
 # =========================================================
-# GIVEAWAY
+# GIVEAWAY — PERSISTENT, RESTART-SAFE
 # =========================================================
 
-@bot.hybrid_command(
-    name="giveaway",
-    description="Start a random-winner giveaway (slash + prefix)."
-)
-@app_commands.describe(
-    prize="The prize being given away",
-    duration="Duration format (e.g. 30s, 10m, 2h, 1d)",
-    winners_count="Number of random winners to pick"
-)
+def _giveaway_duration_seconds(duration: str) -> int:
+    match = re.fullmatch(r"(\d+)([smhd])", (duration or "").strip().lower())
+    if not match:
+        raise ValueError("Use a duration such as 30s, 10m, 2h or 1d.")
+    amount = int(match.group(1))
+    seconds = amount * {"s": 1, "m": 60, "h": 3600, "d": 86400}[match.group(2)]
+    if seconds < 10 or seconds > 30 * 86400:
+        raise ValueError("Giveaway duration must be between 10 seconds and 30 days.")
+    return seconds
+
+
+async def finish_giveaway(message_id: int):
+    row = DB.execute("SELECT * FROM giveaways WHERE message_id=?", (int(message_id),)).fetchone()
+    if not row or int(row["ended"] or 0):
+        return
+    guild = bot.get_guild(int(row["guild_id"]))
+    if guild is None:
+        return
+    channel = guild.get_channel(int(row["channel_id"]))
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(int(row["channel_id"]))
+        except Exception as e:
+            print(f"[GIVEAWAY] Channel unavailable for {message_id}: {type(e).__name__}: {e}")
+            DB.execute("UPDATE giveaways SET ended=1, ended_at=? WHERE message_id=?", (datetime.now(timezone.utc).isoformat(), int(message_id)))
+            DB.commit()
+            return
+    try:
+        message = await channel.fetch_message(int(message_id))
+    except Exception as e:
+        print(f"[GIVEAWAY] Message unavailable for {message_id}: {type(e).__name__}: {e}")
+        DB.execute("UPDATE giveaways SET ended=1, ended_at=? WHERE message_id=?", (datetime.now(timezone.utc).isoformat(), int(message_id)))
+        DB.commit()
+        return
+    participants = []
+    reaction = discord.utils.get(message.reactions, emoji="🎉")
+    if reaction:
+        try:
+            async for user in reaction.users(limit=None):
+                if not user.bot:
+                    participants.append(user.id)
+        except Exception as e:
+            print(f"[GIVEAWAY] Could not fetch participants for {message_id}: {type(e).__name__}: {e}")
+            return
+    winners = []
+    fixed_winner_id = row["fixed_winner_id"] if int(row["test_mode"] or 0) else None
+    if fixed_winner_id and int(fixed_winner_id) in participants:
+        fixed_member = guild.get_member(int(fixed_winner_id))
+        if fixed_member is None:
+            try:
+                fixed_member = await guild.fetch_member(int(fixed_winner_id))
+            except Exception:
+                fixed_member = None
+        if fixed_member:
+            winners.append(fixed_member)
+            participants.remove(int(fixed_winner_id))
+    target_count = max(1, min(20, int(row["winners_count"] or 1)))
+    while len(winners) < target_count and participants:
+        user_id = random.choice(participants)
+        participants.remove(user_id)
+        member = guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except Exception:
+                member = None
+        if member and not member.bot:
+            winners.append(member)
+    winner_ids = [member.id for member in winners]
+    DB.execute("UPDATE giveaways SET ended=1, participants=?, winners=?, ended_at=? WHERE message_id=? AND ended=0",
+               (json.dumps(participants), json.dumps(winner_ids), datetime.now(timezone.utc).isoformat(), int(message_id)))
+    DB.commit()
+    test_mode = bool(int(row["test_mode"] or 0))
+    prize = str(row["prize"])
+    host = guild.get_member(int(row["host_id"]))
+    host_text = host.mention if host else f"<@{int(row['host_id'])}>"
+    if winners:
+        mentions = ", ".join(member.mention for member in winners)
+        title = "🧪 TEST GIVEAWAY COMPLETE" if test_mode else "🎉 GIVEAWAY ENDED 🎉"
+        prefix = "**TEST ONLY — NO REAL PRIZE**\n" if test_mode else ""
+        embed = discord.Embed(title=title,
+            description=f"{prefix}**Prize:** {prize}\n**Winner(s):** {mentions} 🏆\n**Hosted by:** {host_text}",
+            color=discord.Color.blurple() if test_mode else discord.Color.green(),
+            timestamp=datetime.now(timezone.utc))
+        await message.edit(embed=embed, view=None)
+        await channel.send(f"🧪 Test winner: {mentions}. No real prize is awarded." if test_mode
+                           else f"🎊 Congratulations {mentions}! You won **{prize}**!")
+    else:
+        prefix = "**TEST ONLY — NO REAL PRIZE**\n" if test_mode else ""
+        embed = discord.Embed(title="🧪 TEST GIVEAWAY COMPLETE" if test_mode else "🎉 GIVEAWAY ENDED 🎉",
+            description=f"{prefix}**Prize:** {prize}\n❌ No valid participants found.",
+            color=discord.Color.blurple() if test_mode else discord.Color.red(),
+            timestamp=datetime.now(timezone.utc))
+        await message.edit(embed=embed, view=None)
+
+
+@tasks.loop(seconds=15)
+async def giveaway_recovery_task():
+    now = datetime.now(timezone.utc).isoformat()
+    rows = DB.execute("SELECT message_id FROM giveaways WHERE ended=0 AND ends_at IS NOT NULL AND ends_at<=? ORDER BY ends_at LIMIT 25", (now,)).fetchall()
+    for row in rows:
+        try:
+            await finish_giveaway(int(row["message_id"]))
+        except Exception as e:
+            print(f"[GIVEAWAY RECOVERY ERROR] {row['message_id']}: {type(e).__name__}: {e}")
+
+
+@giveaway_recovery_task.before_loop
+async def before_giveaway_recovery():
+    await bot.wait_until_ready()
+
+
+@bot.hybrid_command(name="giveaway", description="Start a random-winner giveaway (slash + prefix).")
+@app_commands.describe(prize="The prize being given away", duration="Duration format (e.g. 30s, 10m, 2h, 1d)", winners_count="Number of random winners to pick")
 @permission_check("manage_guild")
 @app_permission_check("manage_guild")
-async def giveaway(
-    ctx: commands.Context,
-    prize: str,
-    duration: str,
-    winners_count: int = 1
-):
-
-    channel = ctx.channel
-    author = ctx.author
-    guild = ctx.guild
-
-    seconds = parse_time(duration)
-
-    embed = discord.Embed(
-        title="🎉 GIVEAWAY TIME! 🎉",
-        description=(
-            f"**Prize:** {prize}\n"
-            f"**Winner(s):** `{winners_count}`\n"
-            f"**Hosted by:** {author.mention}\n\n"
-            f"React with 🎉 to enter!"
-        ),
-        color=discord.Color.gold(),
-        timestamp=datetime.now(timezone.utc)
-    )
-
-    embed.set_footer(
-        text=f"Ends in {duration}"
-    )
-
-    msg = await ctx.send(embed=embed)
-
-    await msg.add_reaction("🎉")
-    DB.execute("INSERT OR REPLACE INTO giveaways(message_id,guild_id,channel_id,prize,winners_count,host_id,created_at) VALUES (?,?,?,?,?,?,?)",
-               (msg.id, guild.id, channel.id, prize, max(1, winners_count), author.id, datetime.now(timezone.utc).isoformat()))
-    DB.commit()
-
-    await asyncio.sleep(seconds)
-
+async def giveaway(ctx: commands.Context, prize: str, duration: str, winners_count: int = 1):
+    if not ctx.guild:
+        return await send_mod_result(ctx, "Giveaways can only be started in a server.", True)
+    if not 1 <= winners_count <= 20:
+        return await send_mod_result(ctx, "Winners must be between 1 and 20.", True)
     try:
-        msg = await channel.fetch_message(msg.id)
-    except Exception:
-        return
-
-    reaction = discord.utils.get(
-        msg.reactions,
-        emoji="🎉"
-    )
-
-    participants = []
-
-    if reaction:
-        async for u in reaction.users():
-            if not u.bot:
-                participants.append(u.id)
-
-    chosen_winners = []
-
-    while (
-        len(chosen_winners) < winners_count
-        and participants
-    ):
-        winner_id = random.choice(participants)
-
-        participants.remove(winner_id)
-
-        member = guild.get_member(winner_id)
-
-        if member:
-            chosen_winners.append(member)
-
-    DB.execute("UPDATE giveaways SET ended=1, participants=?, winners=?, ended_at=? WHERE message_id=?",
-               (json.dumps(participants), json.dumps([w.id for w in chosen_winners]), datetime.now(timezone.utc).isoformat(), msg.id))
-    DB.commit()
-
-    if chosen_winners:
-
-        winners_mention = ", ".join(
-            [
-                w.mention
-                for w in chosen_winners
-            ]
-        )
-
-        ended_embed = discord.Embed(
-            title="🎉 GIVEAWAY ENDED 🎉",
-            description=(
-                f"**Prize:** {prize}\n"
-                f"**Winner(s):** {winners_mention} 🏆\n"
-                f"**Hosted by:** {author.mention}"
-            ),
-            color=discord.Color.green(),
-            timestamp=datetime.now(timezone.utc)
-        )
-
-        await msg.edit(
-            embed=ended_embed,
-            view=None
-        )
-
-        await channel.send(
-            f"🎊 Congratulations {winners_mention}! "
-            f"You won **{prize}**!"
-        )
-
-    else:
-
-        ended_embed = discord.Embed(
-            title="🎉 GIVEAWAY ENDED 🎉",
-            description=(
-                f"**Prize:** {prize}\n"
-                f"❌ No valid participants found."
-            ),
-            color=discord.Color.red(),
-            timestamp=datetime.now(timezone.utc)
-        )
-
-        await msg.edit(
-            embed=ended_embed,
-            view=None
-        )
-
-
-# =========================================================
-# GIVEAWAY MANAGEMENT / PREFIX-ONLY FIXED WINNER
-# =========================================================
-
-@bot.command(name="giveawayfixed")
-@commands.guild_only()
-async def giveawayfixed_cmd(ctx, duration: str, member: discord.Member, winners_count: int = 1, *, prize: str):
-    """Prefix-only fixed-winner giveaway. Example: ,giveawayfixed 1h @User 1 Nitro Gift"""
-    if not owner_or_permission(ctx, "manage_guild"):
-        return await ctx.send("❌ You need **Manage Server** permission.")
-    if winners_count < 1 or winners_count > 20:
-        return await ctx.send("❌ Winners must be between 1 and 20.")
-    seconds = parse_time(duration)
-    embed = discord.Embed(
-        title="🎉 GIVEAWAY TIME! 🎉",
-        description=f"**Prize:** {prize}\n**Winner(s):** `{winners_count}`\n**Hosted by:** {ctx.author.mention}\n\nReact with 🎉 to enter!",
+        seconds = _giveaway_duration_seconds(duration)
+    except ValueError as e:
+        return await send_mod_result(ctx, str(e), True)
+    ends_at = (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+    embed = discord.Embed(title="🎉 GIVEAWAY TIME! 🎉",
+        description=f"**Prize:** {prize}\n**Winner(s):** {winners_count}\n**Hosted by:** {ctx.author.mention}\n\nReact with 🎉 to enter!",
         color=discord.Color.gold(), timestamp=datetime.now(timezone.utc))
-    embed.set_footer(text=f"Ends in {duration} . Winner Count {winners_count} ")
-    msg = await ctx.send(embed=embed)
-    await msg.add_reaction("🎉")
-    DB.execute("INSERT OR REPLACE INTO giveaways(message_id,guild_id,channel_id,prize,winners_count,host_id,fixed_winner_id,created_at) VALUES (?,?,?,?,?,?,?,?)",
-               (msg.id, ctx.guild.id, ctx.channel.id, prize, winners_count, ctx.author.id, member.id, datetime.now(timezone.utc).isoformat()))
+    embed.set_footer(text=f"Ends in {duration}")
+    message = await ctx.send(embed=embed)
+    await message.add_reaction("🎉")
+    DB.execute("INSERT OR REPLACE INTO giveaways(message_id,guild_id,channel_id,prize,winners_count,host_id,fixed_winner_id,created_at,ends_at,test_mode,ended) VALUES (?,?,?,?,?,?,?,?,?,0,0)",
+        (message.id, ctx.guild.id, ctx.channel.id, prize, winners_count, ctx.author.id, None, datetime.now(timezone.utc).isoformat(), ends_at))
     DB.commit()
-    await asyncio.sleep(seconds)
-    try: msg = await ctx.channel.fetch_message(msg.id)
-    except Exception: return
-    reaction = discord.utils.get(msg.reactions, emoji="🎉")
-    participants=[]
-    if reaction:
-        async for u in reaction.users():
-            if not u.bot: participants.append(u.id)
-    winners=[]
-    if member.id in participants:
-        winners.append(member); participants.remove(member.id)
-    while len(winners)<winners_count and participants:
-        uid=random.choice(participants); participants.remove(uid); m=ctx.guild.get_member(uid)
-        if m: winners.append(m)
-    DB.execute("UPDATE giveaways SET ended=1, participants=?, winners=?, ended_at=? WHERE message_id=?",
-               (json.dumps(participants), json.dumps([w.id for w in winners]), datetime.now(timezone.utc).isoformat(), msg.id)); DB.commit()
-    if winners:
-        mentions=", ".join(w.mention for w in winners)
-        await msg.edit(embed=discord.Embed(title="🎉 GIVEAWAY ENDED 🎉",description=f"**Prize:** {prize}\n**Winner(s):** {mentions} 🏆\n**Hosted by:** {ctx.author.mention}",color=discord.Color.green()),view=None)
-        await ctx.send(f"🎊 Congratulations {mentions}! You won **{prize}**!")
-    else:
-        await msg.edit(embed=discord.Embed(title="🎉 GIVEAWAY ENDED 🎉",description=f"**Prize:** {prize}\n❌ No valid participants found.",color=discord.Color.red()),view=None)
+
+
+@bot.command(name="giveawaytest")
+@commands.guild_only()
+async def giveaway_test_cmd(ctx, duration: str, member: discord.Member, *, prize: str = "Test prize"):
+    """Owner-only prefix command for clearly labelled test giveaways; not listed in public help."""
+    if ctx.author.id != OWNER_ID:
+        return await ctx.send("Owner only.")
+    try:
+        seconds = _giveaway_duration_seconds(duration)
+    except ValueError as e:
+        return await ctx.send(str(e))
+    ends_at = (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+    embed = discord.Embed(title="🧪 TEST GIVEAWAY — NO REAL PRIZE",
+        description=f"**Test item:** {prize}\n**Test winner:** {member.mention}\n**Hosted by:** {ctx.author.mention}\n\nReact with 🎉 to enter this test. No prize will be awarded.",
+        color=discord.Color.blurple(), timestamp=datetime.now(timezone.utc))
+    embed.set_footer(text="TEST ONLY • No real prize")
+    message = await ctx.send(embed=embed)
+    await message.add_reaction("🎉")
+    DB.execute("INSERT OR REPLACE INTO giveaways(message_id,guild_id,channel_id,prize,winners_count,host_id,fixed_winner_id,created_at,ends_at,test_mode,ended) VALUES (?,?,?,?,?,?,?,?,?,1,0)",
+        (message.id, ctx.guild.id, ctx.channel.id, prize, 1, ctx.author.id, member.id, datetime.now(timezone.utc).isoformat(), ends_at))
+    DB.commit()
+
+
+giveaway_test_cmd.hidden = True
+
 
 @bot.hybrid_command(name="reroll", description="Reroll an ended giveaway using its message ID.")
 @app_commands.describe(message_id="The ended giveaway message ID")
 @permission_check("manage_guild")
 @app_permission_check("manage_guild")
 async def reroll_cmd(ctx, message_id: str):
-    try: mid=int(message_id)
-    except ValueError: return await send_mod_result(ctx,"❌ Invalid message ID.",True)
-    row=DB.execute("SELECT * FROM giveaways WHERE message_id=? AND guild_id=?",(mid,ctx.guild.id)).fetchone()
-    if not row or not row["ended"]: return await send_mod_result(ctx,"❌ Ended giveaway not found.",True)
-    try: channel=ctx.guild.get_channel(int(row["channel_id"])); msg=await channel.fetch_message(mid)
-    except Exception: return await send_mod_result(ctx,"❌ I could not access the giveaway message.",True)
-    reaction=discord.utils.get(msg.reactions,emoji="🎉")
-    participants=[]
+    try:
+        mid = int(message_id)
+    except ValueError:
+        return await send_mod_result(ctx, "Invalid message ID.", True)
+    row = DB.execute("SELECT * FROM giveaways WHERE message_id=? AND guild_id=?", (mid, ctx.guild.id)).fetchone()
+    if not row or not row["ended"]:
+        return await send_mod_result(ctx, "Ended giveaway not found.", True)
+    if int(row["test_mode"] or 0):
+        return await send_mod_result(ctx, "Test giveaways cannot be rerolled.", True)
+    channel = ctx.guild.get_channel(int(row["channel_id"]))
+    if channel is None:
+        return await send_mod_result(ctx, "I could not access the giveaway channel.", True)
+    try:
+        message = await channel.fetch_message(mid)
+    except Exception:
+        return await send_mod_result(ctx, "I could not access the giveaway message.", True)
+    reaction = discord.utils.get(message.reactions, emoji="🎉")
+    participants = []
     if reaction:
-        async for u in reaction.users():
-            if not u.bot: participants.append(u.id)
-    old_winners=set(json.loads(row["winners"] or "[]"))
-    candidates=[uid for uid in participants if uid not in old_winners]
-    if not candidates: return await send_mod_result(ctx,"❌ No eligible participant remains for a reroll.",True)
-    uid=random.choice(candidates); member=ctx.guild.get_member(uid) or await bot.fetch_user(uid)
-    await ctx.send(f"🎉 **Giveaway Rerolled!** New winner: {member.mention if hasattr(member,'mention') else member} — **{row['prize']}**")
-    DB.execute("UPDATE giveaways SET winners=? WHERE message_id=?",(json.dumps(list(old_winners|{uid})),mid)); DB.commit()
+        async for user in reaction.users(limit=None):
+            if not user.bot:
+                participants.append(user.id)
+    old_winners = set(json.loads(row["winners"] or "[]"))
+    candidates = [user_id for user_id in participants if user_id not in old_winners]
+    if not candidates:
+        return await send_mod_result(ctx, "No eligible participant remains for a reroll.", True)
+    user_id = random.choice(candidates)
+    member = ctx.guild.get_member(user_id)
+    if member is None:
+        try:
+            member = await ctx.guild.fetch_member(user_id)
+        except Exception:
+            return await send_mod_result(ctx, "Could not resolve the selected member.", True)
+    await ctx.send(f"🎉 **Giveaway Rerolled!** New winner: {member.mention} — **{row['prize']}**")
+    DB.execute("UPDATE giveaways SET winners=? WHERE message_id=?", (json.dumps(list(old_winners | {user_id})), mid))
+    DB.commit()
 
+
+# =========================================================
 # =========================================================
 # RAID PROTECTION
 # =========================================================
@@ -3230,7 +3240,7 @@ async def help_giveaway(
 
     embed.add_field(
         name="/giveaway <prize> <duration> [winners]",
-        value="Random winner giveaway. Slash + prefix. Fixed winner: prefix-only `,giveawayfixed <duration> @member [winners] <prize>`. Reroll with `/reroll` or prefix.",
+        value="Random winner giveaway. Slash + prefix. Reroll with `/reroll` or prefix.",
         inline=False
     )
 
