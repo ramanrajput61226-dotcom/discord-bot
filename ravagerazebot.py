@@ -3421,7 +3421,8 @@ async def help_mod(
 
 @bot.hybrid_command(name="setvclog", aliases=["vclog", "vclogs"], description="Set the channel for voice activity logs.")
 @permission_check("administrator")
-@app_permission_check("administrasync def setvclog_cmd(ctx, channel: discord.TextChannel = None):
+@app_permission_check("administrator")
+async def setvclog_cmd(ctx, channel: discord.TextChannel = None):
     if channel is None:
         set_guild_setting(ctx.guild.id, "voice_log_channel_id", None)
         return await send_mod_result(ctx, "❌ Voice logging cannot be enabled without a channel. Use `/setvclog #channel`.", True)
