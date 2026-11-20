@@ -18,7 +18,7 @@ _db = None
 _ticket_configs = None
 _save_settings = None
 _ensure_ticket_structure = None
-_started = time.time()
+_sessions = {}\n_started = time.time()
 
 FIELDS = {
     "welcome": {
@@ -66,12 +66,14 @@ def _json_error(message, status=400):
     return jsonify({"error": message}), status
 
 
-def _guild_access(guild_id):
-    if not session.get("discord_token") or not session.get("user"):
+def _auth():
+    return _sessions.get(session.get("sid"))\n\n\ndef _guild_access(guild_id):
+    auth = _auth()
+    if not auth:
         return None, _json_error("Please sign in with Discord first.", 401)
     try:
-        guilds = session.get("guilds") or _discord_api("/users/@me/guilds", session["discord_token"])
-        session["guilds"] = guilds
+        guilds = auth.get("guilds") or _discord_api("/users/@me/guilds", auth["token"])
+        auth["guilds"] = guilds
         target = next((g for g in guilds if str(g.get("id")) == str(guild_id)), None)
         if not target:
             return None, _json_error("You do not have access to this server.", 403)
@@ -104,7 +106,7 @@ function esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;',
 function render(){const m=config.modules[active];$('heading').textContent=modules[active];$('subheading').textContent='Customize settings for '+config.guild.name+'.';if(active==='tickets'){loadTickets();return}$('forms').innerHTML='<section class="card"><div class="grid">'+m.keys.map(k=>field(k,config.settings[k])).join('')+'</div><div class="actions"><button class="btn primary" onclick="save()">Save changes</button></div></section>'}
 function nav(){ $('nav').innerHTML=Object.entries(modules).map(([k,v])=>'<button class="nav '+(k===active?'active':'')+'" onclick="active=\''+k+'\';nav();render()">'+v+'</button>').join('')}
 async function loadConfig(){try{config=await api('/api/guild/'+$('guild').value+'/config');channels=config.channels;roles=config.roles;nav();render()}catch(e){$('notice').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}
-async function loadTickets(){try{const d=await api('/api/guild/'+$('guild').value+'/tickets');config.categories=d.categories||[];const panels=d.panels||{};const ids=Object.keys(panels);const id=d.active_panel||ids[0]||'';const p=panels[id]||{};$('forms').innerHTML='<section class="card"><div class="hero"><div><h2>Ticket panel builder</h2><p class="muted">Edit panel copy, category, support role and button label.</p></div><button class="btn" onclick="createTicketPanel()">＋ New panel</button></div><div class="field"><label>Panel</label><select id="ticket_panel" onchange="showTicketPanel()">'+ids.map(x=>'<option value="'+esc(x)+'" '+(x===id?'selected':'')+'>'+esc(panels[x].title||x)+'</option>').join('')+'</select></div><div class="grid" style="margin-top:16px">'+ticketFields(p)+'</div><div class="actions"><button class="btn primary" onclick="saveTicketPanel()">Save ticket panel</button></div></section>';}catch(e){$('forms').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}\nfunction ticketFields(p){const opts=(id,items)=>'<select id="'+id+'"><option value="">Not set</option>'+items.map(x=>'<option value="'+x.id+'" '+(String(p[id==='ticket_category'?'category_id':'role_id']??'')===String(x.id)?'selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select>';return '<div class="field"><label>Panel title</label><input id="ticket_title" value="'+esc(p.title||'Support Hub')+'"></div><div class="field"><label>Panel description</label><textarea id="ticket_desc">'+esc(p.desc||'')+'</textarea></div><div class="field"><label>Ticket title template</label><input id="ticket_title_template" value="'+esc(p.ticket_title||'🎫 {type} Ticket')+'"></div><div class="field"><label>Ticket description</label><textarea id="ticket_description">'+esc(p.ticket_desc||'')+'</textarea></div><div class="field"><label>Open message</label><input id="ticket_open_message" value="'+esc(p.ticket_open_message||'')+'"></div><div class="field"><label>Footer</label><input id="ticket_footer" value="'+esc(p.ticket_footer||'')+'"></div><div class="field"><label>Category</label>'+opts('ticket_category',config.categories||[])+'</div><div class="field"><label>Support role</label>'+opts('ticket_role',roles)+'</div><div class="field"><label>Button label</label><input id="ticket_button" value="'+esc(Object.values(p.buttons||{})[0]?.label||'Support')+'"></div>'}\nasync function showTicketPanel(){await loadTickets()}\nasync function createTicketPanel(){try{await api('/api/guild/'+$('guild').value+'/tickets',{method:'POST',body:'{}'});await loadTickets()}catch(e){$('notice').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}\nasync function saveTicketPanel(){try{const payload={panel_id:$('ticket_panel').value,title:$('ticket_title').value,desc:$('ticket_desc').value,ticket_title:$('ticket_title_template').value,ticket_desc:$('ticket_description').value,ticket_open_message:$('ticket_open_message').value,ticket_footer:$('ticket_footer').value,category_id:$('ticket_category').value,role_id:$('ticket_role').value,button_label:$('ticket_button').value};await api('/api/guild/'+$('guild').value+'/tickets',{method:'PATCH',body:JSON.stringify(payload)});$('notice').innerHTML='<div class="notice">✓ Ticket panel saved.</div>';await loadTickets()}catch(e){$('notice').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}\nasync function save(){try{const m=config.modules[active],values={};for(const k of m.keys){const el=$('f_'+k);if(!el)continue;values[k]=el.value}await api('/api/guild/'+$('guild').value+'/config',{method:'PATCH',body:JSON.stringify(values)});$('notice').innerHTML='<div class="notice">✓ Saved. Agni will use the updated settings.</div>';await loadConfig()}catch(e){$('notice').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}
+async function loadTickets(){try{const d=await api('/api/guild/'+$('guild').value+'/tickets');config.categories=d.categories||[];const panels=d.panels||{};const ids=Object.keys(panels);const id=d.active_panel||ids[0]||'';const p=panels[id]||{};$('forms').innerHTML='<section class="card"><div class="hero"><div><h2>Ticket panel builder</h2><p class="muted">Edit panel copy, category, support role and button label.</p></div><button class="btn" onclick="createTicketPanel()">＋ New panel</button></div><div class="field"><label>Panel</label><select id="ticket_panel" onchange="showTicketPanel()">'+ids.map(x=>'<option value="'+esc(x)+'" '+(x===id?'selected':'')+'>'+esc(panels[x].title||x)+'</option>').join('')+'</select></div><div class="grid" style="margin-top:16px">'+ticketFields(p)+'</div><div class="actions"><button class="btn primary" onclick="saveTicketPanel()">Save ticket panel</button></div></section>';}catch(e){$('forms').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}\nfunction ticketFields(p){const opts=(id,items)=>'<select id="'+id+'"><option value="">Not set</option>'+items.map(x=>'<option value="'+x.id+'" '+(String(p[id==='ticket_category'?'category_id':'role_id']??'')===String(x.id)?'selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select>';return '<div class="field"><label>Ticket log channel</label><select id="ticket_log_channel_id"><option value="">Not set</option>'+channels.map(x=>'<option value="'+x.id+'" '+(String(config.settings.ticket_log_channel_id??'')===String(x.id)?'selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select></div><div class="field"><label>Panel title</label><input id="ticket_title" value="'+esc(p.title||'Support Hub')+'"></div><div class="field"><label>Panel description</label><textarea id="ticket_desc">'+esc(p.desc||'')+'</textarea></div><div class="field"><label>Ticket title template</label><input id="ticket_title_template" value="'+esc(p.ticket_title||'🎫 {type} Ticket')+'"></div><div class="field"><label>Ticket description</label><textarea id="ticket_description">'+esc(p.ticket_desc||'')+'</textarea></div><div class="field"><label>Open message</label><input id="ticket_open_message" value="'+esc(p.ticket_open_message||'')+'"></div><div class="field"><label>Footer</label><input id="ticket_footer" value="'+esc(p.ticket_footer||'')+'"></div><div class="field"><label>Category</label>'+opts('ticket_category',config.categories||[])+'</div><div class="field"><label>Support role</label>'+opts('ticket_role',roles)+'</div><div class="field"><label>Button label</label><input id="ticket_button" value="'+esc(Object.values(p.buttons||{})[0]?.label||'Support')+'"></div>'}\nasync function showTicketPanel(){await loadTickets()}\nasync function createTicketPanel(){try{await api('/api/guild/'+$('guild').value+'/tickets',{method:'POST',body:'{}'});await loadTickets()}catch(e){$('notice').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}\nasync function saveTicketPanel(){try{const payload={panel_id:$('ticket_panel').value,title:$('ticket_title').value,desc:$('ticket_desc').value,ticket_title:$('ticket_title_template').value,ticket_desc:$('ticket_description').value,ticket_open_message:$('ticket_open_message').value,ticket_footer:$('ticket_footer').value,category_id:$('ticket_category').value,role_id:$('ticket_role').value,button_label:$('ticket_button').value};await api('/api/guild/'+$('guild').value+'/tickets',{method:'PATCH',body:JSON.stringify(payload)});await api('/api/guild/'+$('guild').value+'/config',{method:'PATCH',body:JSON.stringify({ticket_log_channel_id:$('ticket_log_channel_id').value})});$('notice').innerHTML='<div class="notice">✓ Ticket panel saved.</div>';await loadTickets()}catch(e){$('notice').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}\nasync function save(){try{const m=config.modules[active],values={};for(const k of m.keys){const el=$('f_'+k);if(!el)continue;values[k]=el.value}await api('/api/guild/'+$('guild').value+'/config',{method:'PATCH',body:JSON.stringify(values)});$('notice').innerHTML='<div class="notice">✓ Saved. Agni will use the updated settings.</div>';await loadConfig()}catch(e){$('notice').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}
 async function start(){try{const d=await api('/api/me');me=d.user;guilds=d.guilds;$('login').classList.add('hidden');$('app').classList.remove('hidden');$('userbox').textContent=me.username+' · signed in';$('guild').innerHTML=guilds.map(g=>'<option value="'+g.id+'">'+esc(g.name)+'</option>').join('');$('botstatus').textContent=d.bot.connected?'● Bot online':'● Bot offline';if(guilds.length)await loadConfig();else $('forms').innerHTML='<div class="card">No servers found where you have Manage Server permission and Agni is installed.</div>'}catch(e){$('loginmsg').textContent=e.message}}
 start();
 </script></body></html>"""
@@ -144,9 +146,11 @@ def oauth_callback():
     try:
         form = urllib.parse.urlencode({"client_id": os.environ["DISCORD_CLIENT_ID"], "client_secret": os.environ["DISCORD_CLIENT_SECRET"], "grant_type": "authorization_code", "code": code, "redirect_uri": request.url_root.rstrip("/") + "/auth/callback"}).encode()
         token = _discord_api("/oauth2/token", method="POST", data=form)
-        session["discord_token"] = token["access_token"]
-        session["user"] = _discord_api("/users/@me", session["discord_token"])
-        session["guilds"] = _discord_api("/users/@me/guilds", session["discord_token"])
+        access_token = token["access_token"]
+        sid = secrets.token_urlsafe(32)
+        _sessions[sid] = {"token": access_token, "user": _discord_api("/users/@me", access_token), "guilds": _discord_api("/users/@me/guilds", access_token)}
+        session.clear()
+        session["sid"] = sid
         return redirect("/dashboard")
     except Exception:
         session.clear()
@@ -155,18 +159,21 @@ def oauth_callback():
 
 @bp.get("/auth/logout")
 def oauth_logout():
+    _sessions.pop(session.get("sid"), None)
     session.clear()
     return redirect("/dashboard")
 
 
 @bp.get("/api/me")
 def api_me():
-    if not session.get("discord_token"):
+    auth = _auth()
+    if not auth:
         return _json_error("Not signed in.", 401)
     try:
-        guilds = session.get("guilds") or _discord_api("/users/@me/guilds", session["discord_token"])
+        guilds = auth.get("guilds") or _discord_api("/users/@me/guilds", auth["token"])
+        auth["guilds"] = guilds
         allowed = [g for g in guilds if int(g.get("permissions", "0")) & (0x20 | 0x8) and _bot.get_guild(int(g["id"]))]
-        return jsonify(user=session.get("user"), guilds=[{"id":g["id"],"name":g["name"],"icon":g.get("icon")} for g in allowed], bot={"connected": bool(_bot.is_ready()),"guild_count":len(_bot.guilds)})
+        return jsonify(user=auth.get("user"), guilds=[{"id":g["id"],"name":g["name"],"icon":g.get("icon")} for g in allowed], bot={"connected": bool(_bot.is_ready()),"guild_count":len(_bot.guilds)})
     except Exception:
         return _json_error("Discord session expired. Sign in again.", 401)
 
