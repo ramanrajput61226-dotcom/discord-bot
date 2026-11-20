@@ -27,6 +27,9 @@ except ImportError:
         pass
     def set_bot_status(**kwargs):
         pass
+    dashboard_app = None
+    def register_dashboard(*args, **kwargs):
+        pass
 
 
 OWNER_ID = int(os.getenv("BOT_OWNER_ID") or "1255544682759323680")
@@ -3592,6 +3595,8 @@ BOT_TOKEN = os.getenv("DISCORD_TOKEN")
 if not BOT_TOKEN:
     raise SystemExit("FATAL: DISCORD_TOKEN is missing. Add it to the hosting provider's environment/secrets.")
 
+if dashboard_app is not None:
+    register_dashboard(dashboard_app, bot, DB, ticket_configs, save_persistent_settings, ensure_ticket_structure)
 keep_alive()
 set_bot_status(connected=False, error="Connecting to Discord gateway")
 bot.run(BOT_TOKEN)
