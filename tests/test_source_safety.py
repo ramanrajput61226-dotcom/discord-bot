@@ -150,3 +150,21 @@ def test_anti_nuke_tracks_role_deletions_with_per_guild_threshold():
     assert "AuditLogAction.role_delete" in role_flow
     assert "_record_nuke_action" in role_flow
     assert 'get_guild_setting(role.guild.id, "nuke_role_limit", 3)' in role_flow
+
+
+def test_ticket_log_channel_uses_dedicated_guild_setting():
+    source = read_source()
+    start = source.index("async def ticket_log_channel")
+    end = source.index("@bot.hybrid_command", start)
+    command = source[start:end]
+    assert 'set_guild_setting(ctx.guild.id, "ticket_log_channel_id", channel.id)' in command
+    assert 'set_guild_setting(ctx.guild.id, "log_channel_id", channel.id)' not in command
+
+
+def test_disabling_voice_logs_clears_only_voice_log_setting():
+    source = read_source()
+    start = source.index("async def setvclog_cmd")
+    end = source.index("@bot.hybrid_command", start)
+    command = source[start:end]
+    assert 'set_guild_setting(ctx.guild.id, "voice_log_channel_id", None)' in command
+    assert 'set_guild_setting(ctx.guild.id, "log_channel_id", None)' not in command
