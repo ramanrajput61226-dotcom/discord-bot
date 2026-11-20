@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: agni-discord-bot
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python ravagerazebot.py
+    healthCheckPath: /health
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: AGNI_DB_PATH
+        value: /var/data/agni_data.sqlite3
+      - key: AGNI_CONFIG_PATH
+        value: /var/data/bot_settings.json
+      - key: AGNI_BACKUP_DIR
+        value: /var/data/backups
+      - key: PYTHONUNBUFFERED
+        value: "1"
+    disk:
+      name: agni-data
+      mountPath: /var/data
+      sizeGB: 1

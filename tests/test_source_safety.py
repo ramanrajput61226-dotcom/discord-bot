@@ -168,3 +168,28 @@ def test_disabling_voice_logs_clears_only_voice_log_setting():
     command = source[start:end]
     assert 'set_guild_setting(ctx.guild.id, "voice_log_channel_id", None)' in command
     assert 'set_guild_setting(ctx.guild.id, "log_channel_id", None)' not in command
+
+def test_dashboard_reports_discord_gateway_separately_from_web_health():
+    dashboard = (SOURCE.parent / "keep_alive.py").read_text(encoding="utf-8")
+    assert '"/api/status"' in dashboard
+    assert '"discord_connected": state["connected"]' in dashboard
+    assert "Discord gateway state is reported separately" in dashboard
+    assert "def set_bot_status" in dashboard
+
+
+def test_missing_discord_token_fails_fast_and_runtime_paths_are_configurable():
+    source = read_source()
+    assert 'os.getenv("AGNI_DB_PATH", "agni_data.sqlite3")' in source
+    assert 'os.getenv("AGNI_CONFIG_PATH", "bot_settings.json")' in source
+    assert 'if not BOT_TOKEN:' in source
+    assert "FATAL: DISCORD_TOKEN is missing" in source
+    assert "async def on_disconnect" in source
+    assert "async def on_resumed" in source
+
+
+def test_render_blueprint_starts_bot_and_mounts_persistent_data():
+    config = (SOURCE.parent / "render.yaml").read_text(encoding="utf-8")
+    assert "startCommand: python ravagerazebot.py" in config
+    assert "healthCheckPath: /health" in config
+    assert "mountPath: /var/data" in config
+    assert "key: DISCORD_TOKEN" in config

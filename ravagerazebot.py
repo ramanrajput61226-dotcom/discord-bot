@@ -20,9 +20,11 @@ from discord.ext import commands, tasks
 from discord.ui import Modal, TextInput
 
 try:
-    from keep_alive import keep_alive
+    from keep_alive import keep_alive, set_bot_status
 except ImportError:
     def keep_alive():
+        pass
+    def set_bot_status(**kwargs):
         pass
 
 
@@ -47,16 +49,16 @@ invites_cache = {}
 spam_tracking = {}
 nuke_tracking = {}
 
-CONFIG_FILE = "bot_settings.json"
+CONFIG_FILE = os.getenv("AGNI_CONFIG_PATH", "bot_settings.json")
 
 # User databases are created by the schema initializer below; never ship live data in source control.
 
-BACKUP_DIR = Path("backups")
+BACKUP_DIR = Path(os.getenv("AGNI_BACKUP_DIR", "backups"))
 BACKUP_LIMIT = 10
 backup_task_started = False
 raid_join_tracking = defaultdict(list)
 
-DB_FILE = "agni_data.sqlite3"
+DB_FILE = os.getenv("AGNI_DB_PATH", "agni_data.sqlite3")
 DB = sqlite3.connect(DB_FILE, check_same_thread=False)
 DB.row_factory = sqlite3.Row
 DB.execute("PRAGMA journal_mode=WAL")
@@ -361,6 +363,7 @@ def owner_or_permission(ctx, permission: str) -> bool:
 
 @bot.event
 async def on_ready():
+    set_bot_status(connected=True, user=bot.user, guild_count=len(bot.guilds), latency_ms=bot.latency * 1000)
     load_persistent_settings()
     print("==================================================")
     print(f" Logged in successfully as {bot.user}")
@@ -3574,13 +3577,20 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 # START BOT
 # =========================================================
 
-keep_alive()
+@bot.event
+async def on_disconnect():
+    set_bot_status(connected=False, guild_count=len(bot.guilds), error="Discord gateway disconnected")
+
+
+@bot.event
+async def on_resumed():
+    set_bot_status(connected=True, user=bot.user, guild_count=len(bot.guilds), latency_ms=bot.latency * 1000)
+
 
 BOT_TOKEN = os.getenv("DISCORD_TOKEN")
+if not BOT_TOKEN:
+    raise SystemExit("FATAL: DISCORD_TOKEN is missing. Add it to the hosting provider's environment/secrets.")
 
-if BOT_TOKEN:
-    bot.run(BOT_TOKEN)
-else:
-    print(
-        "❌ Error: DISCORD_TOKEN environment variable not found!"
-    )
+keep_alive()
+set_bot_status(connected=False, error="Connecting to Discord gateway")
+bot.run(BOT_TOKEN)

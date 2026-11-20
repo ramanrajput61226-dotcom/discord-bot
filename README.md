@@ -18,8 +18,11 @@ The bot reads `DISCORD_TOKEN` from the process environment. Hosting panels shoul
 ## Persistent storage
 Server configuration and user data live in `agni_data.sqlite3`; optional JSON settings are in `bot_settings.json`, and scheduled backups are in `backups/`. Mount persistent storage at the working directory when deploying to an ephemeral host. Back up SQLite before upgrades. Never delete or overwrite an existing database to troubleshoot startup.
 
-## Health endpoint
-The optional Flask server starts alongside the bot. `/` returns service status JSON and `/health` returns HTTP 200 when the web process responds. This checks the web process, not Discord gateway connectivity. Set `PORT` if required by your host.
+## Website and live status
+The Flask website is served at `/` and displays the real Discord gateway connection state, server count, latency, last successful connection and process uptime. The JSON status is available at `/api/status`. The `/health` endpoint checks only that the hosting web process is responding; it is intentionally separate from Discord connectivity.
+
+## Render deployment
+A `render.yaml` Blueprint is included. It runs `python ravagerazebot.py`, exposes the website and mounts a persistent disk at `/var/data` for SQLite, JSON settings and backups. During Blueprint setup, add the real `DISCORD_TOKEN` as a secret environment variable in Render. Never paste the token into GitHub or chat. The bot exits with a clear startup error if the token is missing. The dashboard reports Discord as offline until the Gateway login succeeds.
 
 ## Permissions and safety
 Grant only the permissions required by enabled features. Typical moderation/ticket features need View Channels, Send Messages, Read Message History, Manage Channels, Manage Messages, Moderate Members and role-specific moderation permissions. The bot's highest role must be above roles it manages.
