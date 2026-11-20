@@ -47,16 +47,16 @@ invites_cache = {}
 spam_tracking = {}
 nuke_tracking = {}
 
-CONFIG_FILE = "bot_settings.json"
+CONFIG_FILE = os.getenv("AGNI_CONFIG_PATH", "bot_settings.json")
 
 # User databases are created by the schema initializer below; never ship live data in source control.
 
-BACKUP_DIR = Path("backups")
+BACKUP_DIR = Path(os.getenv("AGNI_BACKUP_DIR", "backups"))
 BACKUP_LIMIT = 10
 backup_task_started = False
 raid_join_tracking = defaultdict(list)
 
-DB_FILE = "agni_data.sqlite3"
+DB_FILE = os.getenv("AGNI_DB_PATH", "agni_data.sqlite3")
 DB = sqlite3.connect(DB_FILE, check_same_thread=False)
 DB.row_factory = sqlite3.Row
 DB.execute("PRAGMA journal_mode=WAL")
