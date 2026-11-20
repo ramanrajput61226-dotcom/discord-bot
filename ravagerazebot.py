@@ -20,7 +20,7 @@ from discord.ext import commands, tasks
 from discord.ui import Modal, TextInput
 
 try:
-    from keep_alive import keep_alive, set_bot_status
+    from keep_alive import app as dashboard_app, keep_alive, set_bot_status\n    from dashboard import register_dashboard
 except ImportError:
     def keep_alive():
         pass
