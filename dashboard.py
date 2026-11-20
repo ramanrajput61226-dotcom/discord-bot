@@ -15,6 +15,9 @@ from flask import Blueprint, jsonify, redirect, render_template_string, request,
 bp = Blueprint("agni_dashboard", __name__)
 _bot = None
 _db = None
+_ticket_configs = None
+_save_settings = None
+_ensure_ticket_structure = None
 _started = time.time()
 
 FIELDS = {
@@ -98,18 +101,19 @@ const $=id=>document.getElementById(id);
 async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});const d=await r.json();if(!r.ok)throw Error(d.error||'Request failed');return d}
 function field(key,value){const label=key.replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());let input='';if(key.endsWith('_channel_id')||key.endsWith('_role_id')){const list=key.endsWith('_role_id')?roles:channels;input='<select id="f_'+key+'"><option value="">Not set</option>'+list.map(x=>'<option value="'+x.id+'" '+(String(value??'')===String(x.id)?'selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select>'}else if(['welcome_enabled','automod_enabled','link_filter','caps_filter','automod_spam','automod_duplicate','automod_invites','raid_enabled'].includes(key)){input='<select id="f_'+key+'"><option value="0" '+(!value?'selected':'')+'>Disabled</option><option value="1" '+(value?'selected':'')+'>Enabled</option></select>'}else if(key==='automod_action'||key==='raid_action'){const vals=key==='automod_action'?['delete','warn','timeout']:['lockdown','log'];input='<select id="f_'+key+'">'+vals.map(v=>'<option '+(value===v?'selected':'')+'>'+v+'</option>').join('')+'</select>'}else if(key==='welcome_message'||key==='goodbye_message'||key==='bad_words'||key==='reaction_roles'){input='<textarea id="f_'+key+'">'+esc(value??'')+'</textarea>'}else{input='<input id="f_'+key+'" value="'+esc(value??'')+'" '+(['mention_limit','automod_max_message','raid_threshold','raid_window','nuke_ban_limit','nuke_channel_limit','nuke_role_limit'].includes(key)?'type="number" min="0"':'')+'>'}return '<div class="field"><label>'+label+'</label>'+input+'</div>'}
 function esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function render(){const m=config.modules[active];$('heading').textContent=modules[active];$('subheading').textContent='Customize settings for '+config.guild.name+'.';$('forms').innerHTML='<section class="card"><div class="grid">'+m.keys.map(k=>field(k,config.settings[k])).join('')+'</div><div class="actions"><button class="btn primary" onclick="save()">Save changes</button></div></section>'}
+function render(){const m=config.modules[active];$('heading').textContent=modules[active];$('subheading').textContent='Customize settings for '+config.guild.name+'.';if(active==='tickets'){loadTickets();return}$('forms').innerHTML='<section class="card"><div class="grid">'+m.keys.map(k=>field(k,config.settings[k])).join('')+'</div><div class="actions"><button class="btn primary" onclick="save()">Save changes</button></div></section>'}
 function nav(){ $('nav').innerHTML=Object.entries(modules).map(([k,v])=>'<button class="nav '+(k===active?'active':'')+'" onclick="active=\''+k+'\';nav();render()">'+v+'</button>').join('')}
 async function loadConfig(){try{config=await api('/api/guild/'+$('guild').value+'/config');channels=config.channels;roles=config.roles;nav();render()}catch(e){$('notice').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}
-async function save(){try{const m=config.modules[active],values={};for(const k of m.keys){const el=$('f_'+k);if(!el)continue;values[k]=el.value}await api('/api/guild/'+$('guild').value+'/config',{method:'PATCH',body:JSON.stringify(values)});$('notice').innerHTML='<div class="notice">✓ Saved. Agni will use the updated settings.</div>';await loadConfig()}catch(e){$('notice').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}
+async function loadTickets(){try{const d=await api('/api/guild/'+$('guild').value+'/tickets');const panels=d.panels||{};const ids=Object.keys(panels);const id=d.active_panel||ids[0]||'';const p=panels[id]||{};$('forms').innerHTML='<section class="card"><div class="hero"><div><h2>Ticket panel builder</h2><p class="muted">Edit panel copy, category, support role and button label.</p></div><button class="btn" onclick="createTicketPanel()">＋ New panel</button></div><div class="field"><label>Panel</label><select id="ticket_panel" onchange="showTicketPanel()">'+ids.map(x=>'<option value="'+esc(x)+'" '+(x===id?'selected':'')+'>'+esc(panels[x].title||x)+'</option>').join('')+'</select></div><div class="grid" style="margin-top:16px">'+ticketFields(p)+'</div><div class="actions"><button class="btn primary" onclick="saveTicketPanel()">Save ticket panel</button></div></section>';}catch(e){$('forms').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}\nfunction ticketFields(p){const opts=(id,items)=>'<select id="'+id+'"><option value="">Not set</option>'+items.map(x=>'<option value="'+x.id+'" '+(String(p[id==='ticket_category'?'category_id':'role_id']??'')===String(x.id)?'selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select>';return '<div class="field"><label>Panel title</label><input id="ticket_title" value="'+esc(p.title||'Support Hub')+'"></div><div class="field"><label>Panel description</label><textarea id="ticket_desc">'+esc(p.desc||'')+'</textarea></div><div class="field"><label>Ticket title template</label><input id="ticket_title_template" value="'+esc(p.ticket_title||'🎫 {type} Ticket')+'"></div><div class="field"><label>Ticket description</label><textarea id="ticket_description">'+esc(p.ticket_desc||'')+'</textarea></div><div class="field"><label>Open message</label><input id="ticket_open_message" value="'+esc(p.ticket_open_message||'')+'"></div><div class="field"><label>Footer</label><input id="ticket_footer" value="'+esc(p.ticket_footer||'')+'"></div><div class="field"><label>Category</label>'+opts('ticket_category',config.categories||[])+'</div><div class="field"><label>Support role</label>'+opts('ticket_role',roles)+'</div><div class="field"><label>Button label</label><input id="ticket_button" value="'+esc(Object.values(p.buttons||{})[0]?.label||'Support')+'"></div>'}\nasync function showTicketPanel(){await loadTickets()}\nasync function createTicketPanel(){try{await api('/api/guild/'+$('guild').value+'/tickets',{method:'POST',body:'{}'});await loadTickets()}catch(e){$('notice').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}\nasync function saveTicketPanel(){try{const payload={panel_id:$('ticket_panel').value,title:$('ticket_title').value,desc:$('ticket_desc').value,ticket_title:$('ticket_title_template').value,ticket_desc:$('ticket_description').value,ticket_open_message:$('ticket_open_message').value,ticket_footer:$('ticket_footer').value,category_id:$('ticket_category').value,role_id:$('ticket_role').value,button_label:$('ticket_button').value};await api('/api/guild/'+$('guild').value+'/tickets',{method:'PATCH',body:JSON.stringify(payload)});$('notice').innerHTML='<div class="notice">✓ Ticket panel saved.</div>';await loadTickets()}catch(e){$('notice').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}\nasync function save(){try{const m=config.modules[active],values={};for(const k of m.keys){const el=$('f_'+k);if(!el)continue;values[k]=el.value}await api('/api/guild/'+$('guild').value+'/config',{method:'PATCH',body:JSON.stringify(values)});$('notice').innerHTML='<div class="notice">✓ Saved. Agni will use the updated settings.</div>';await loadConfig()}catch(e){$('notice').innerHTML='<div class="notice">'+esc(e.message)+'</div>'}}
 async function start(){try{const d=await api('/api/me');me=d.user;guilds=d.guilds;$('login').classList.add('hidden');$('app').classList.remove('hidden');$('userbox').textContent=me.username+' · signed in';$('guild').innerHTML=guilds.map(g=>'<option value="'+g.id+'">'+esc(g.name)+'</option>').join('');$('botstatus').textContent=d.bot.connected?'● Bot online':'● Bot offline';if(guilds.length)await loadConfig();else $('forms').innerHTML='<div class="card">No servers found where you have Manage Server permission and Agni is installed.</div>'}catch(e){$('loginmsg').textContent=e.message}}
 start();
 </script></body></html>"""
 
 
-def register_dashboard(app, bot, db):
-    global _bot, _db
+def register_dashboard(app, bot, db, ticket_configs=None, save_settings=None, ensure_ticket_structure=None):
+    global _bot, _db, _ticket_configs, _save_settings, _ensure_ticket_structure
     _bot, _db = bot, db
+    _ticket_configs, _save_settings, _ensure_ticket_structure = ticket_configs, save_settings, ensure_ticket_structure
     app.secret_key = os.getenv("DASHBOARD_SECRET_KEY") or secrets.token_urlsafe(48)
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=True)
     app.register_blueprint(bp)
@@ -241,3 +245,82 @@ def api_update_config(guild_id):
     except Exception:
         _db.rollback()
         return _json_error("Could not save settings.", 500)
+
+
+@bp.get("/api/guild/<int:guild_id>/tickets")
+def api_get_tickets(guild_id):
+    guild, error = _guild_access(guild_id)
+    if error:
+        return error
+    if _ticket_configs is None:
+        return _json_error("Ticket panel editor is unavailable.", 503)
+    data = _ensure_ticket_structure(guild_id) if _ensure_ticket_structure else _ticket_configs.get(guild_id)
+    return jsonify(active_panel=(data or {}).get("active_panel"), panels=(data or {}).get("panels", {}), categories=[{"id":str(c.id),"name":c.name} for c in guild.categories])
+
+
+@bp.post("/api/guild/<int:guild_id>/tickets")
+def api_create_ticket_panel(guild_id):
+    guild, error = _guild_access(guild_id)
+    if error:
+        return error
+    if _ticket_configs is None:
+        return _json_error("Ticket panel editor is unavailable.", 503)
+    data = _ensure_ticket_structure(guild_id) if _ensure_ticket_structure else _ticket_configs.setdefault(guild_id, {})
+    if not data:
+        data = {"active_panel": None, "panels": {}}
+        _ticket_configs[guild_id] = data
+    import secrets as _secrets
+    panel_id = "panel_" + _secrets.token_hex(4)
+    data.setdefault("panels", {})[panel_id] = {"title":"Support Hub","desc":"Choose a ticket type below.","ticket_title":"🎫 {type} Ticket","ticket_desc":"Ticket opened by {user}","ticket_open_message":"{role} New ticket opened by {user}","ticket_footer":"Opened by {user}","ticket_color":3447003,"category_id":None,"role_id":None,"buttons":{"button_"+_secrets.token_hex(3):{"label":"Support","questions":[]}}}
+    data["active_panel"] = panel_id
+    if _save_settings:
+        _save_settings()
+    return jsonify(panel_id=panel_id), 201
+
+
+@bp.patch("/api/guild/<int:guild_id>/tickets")
+def api_update_ticket_panel(guild_id):
+    guild, error = _guild_access(guild_id)
+    if error:
+        return error
+    if _ticket_configs is None:
+        return _json_error("Ticket panel editor is unavailable.", 503)
+    payload = request.get_json(silent=True) or {}
+    data = _ensure_ticket_structure(guild_id) if _ensure_ticket_structure else _ticket_configs.get(guild_id)
+    panel_id = str(payload.get("panel_id", ""))
+    panel = (data or {}).get("panels", {}).get(panel_id)
+    if not panel:
+        return _json_error("Ticket panel not found.", 404)
+    limits = {"title":100,"desc":1000,"ticket_title":200,"ticket_desc":1500,"ticket_open_message":500,"ticket_footer":200,"button_label":80}
+    for key, limit in limits.items():
+        if key in payload:
+            value = payload[key]
+            if not isinstance(value, str) or len(value) > limit:
+                return _json_error(key + " is too long or invalid.")
+    category_id = payload.get("category_id") or None
+    role_id = payload.get("role_id") or None
+    if category_id:
+        try:
+            category = guild.get_channel(int(category_id))
+            if category is None or not getattr(category, "type", None) or category.type.name != "category":
+                return _json_error("Select a category from this server.")
+        except (TypeError, ValueError):
+            return _json_error("Invalid category.")
+    if role_id:
+        try:
+            if guild.get_role(int(role_id)) is None:
+                return _json_error("Select a support role from this server.")
+        except (TypeError, ValueError):
+            return _json_error("Invalid support role.")
+    for key in ("title","desc","ticket_title","ticket_desc","ticket_open_message","ticket_footer"):
+        if key in payload:
+            panel[key] = payload[key]
+    panel["category_id"] = int(category_id) if category_id else None
+    panel["role_id"] = int(role_id) if role_id else None
+    buttons = panel.setdefault("buttons", {})
+    if buttons and payload.get("button_label") is not None:
+        first = next(iter(buttons))
+        buttons[first]["label"] = payload["button_label"]
+    if _save_settings:
+        _save_settings()
+    return jsonify(saved=True, panel_id=panel_id)
