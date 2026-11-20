@@ -133,7 +133,8 @@ def test_anti_nuke_matches_fresh_audit_entries_to_exact_target():
     start = source.index("async def _find_recent_audit_executor")
     end = source.index("@bot.event", start)
     helper = source[start:end]
-    assert "entry.target" in helper
+    assert 'getattr(entry, "target", None)' in helper
+    assert 'getattr(target, "id", None) != int(target_id)' in helper
     assert "target_id" in helper
     assert "age <= 15" in helper
     assert "guild.audit_logs(limit=8" in helper
