@@ -1799,7 +1799,7 @@ async def ticket_log_channel(
     global ticket_log_channel_id
 
     ticket_log_channel_id = channel.id
-    set_guild_setting(ctx.guild.id, "log_channel_id", channel.id)
+    set_guild_setting(ctx.guild.id, "ticket_log_channel_id", channel.id)
     save_persistent_settings()
 
     await ctx.send(
@@ -3424,7 +3424,7 @@ async def help_mod(
 @app_permission_check("administrator")
 async def setvclog_cmd(ctx, channel: discord.TextChannel = None):
     if channel is None:
-        set_guild_setting(ctx.guild.id, "log_channel_id", None)
+        set_guild_setting(ctx.guild.id, "voice_log_channel_id", None)
         return await send_mod_result(ctx, "❌ Voice logging cannot be enabled without a channel. Use `/setvclog #channel`.", True)
     set_guild_setting(ctx.guild.id, "voice_log_channel_id", channel.id)
     await send_mod_result(ctx, f"🎙️ Voice logs will now be sent to {channel.mention}.")
