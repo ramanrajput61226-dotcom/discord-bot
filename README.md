@@ -44,3 +44,7 @@ GitHub Actions runs syntax and regression checks on pushes to `main`/the upgrade
 
 ## Database privacy
 The SQLite database and server settings are created at runtime and must never be committed or embedded in source code. Keep the database on a private persistent disk/volume, restrict access to it, and maintain private backups outside Git. A fresh installation starts with an empty database and initializes its schema automatically.
+
+
+## Giveaway reliability
+Giveaways are stored with a UTC end timestamp and processed by a recovery task after startup, so a process restart does not cancel an active giveaway. Normal giveaways always select random eligible participants. The hidden owner-only `giveawaytest` prefix command is for testing only: its public message is explicitly marked as a test with no real prize, and the selected test member must enter. It is excluded from the public help output.
