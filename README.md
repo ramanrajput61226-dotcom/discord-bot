@@ -48,3 +48,7 @@ The SQLite database and server settings are created at runtime and must never be
 
 ## Giveaway reliability
 Giveaways are stored with a UTC end timestamp and processed by a recovery task after startup, so a process restart does not cancel an active giveaway. Normal giveaways always select random eligible participants. The hidden owner-only `giveawaytest` prefix command is for testing only: its public message is explicitly marked as a test with no real prize, and the selected test member must enter. It is excluded from the public help output.
+
+
+## Anti-nuke audit safety
+Channel and role deletion protection only counts a matching audit-log entry for the exact deleted object when the entry is recent. Role deletions have a per-server threshold (default 3 in a 2-minute window), configurable with `/set_role_limit`. The bot needs View Audit Log and Ban Members permissions for attribution and automatic enforcement. Administrators and the configured bot owner are treated as trusted executors by the existing allowlist behavior.
