@@ -169,6 +169,7 @@ for _sql in (
     "ALTER TABLE guild_settings ADD COLUMN raid_action TEXT DEFAULT 'lockdown'",
     "ALTER TABLE guild_settings ADD COLUMN nuke_ban_limit INTEGER DEFAULT 5",
     "ALTER TABLE guild_settings ADD COLUMN nuke_channel_limit INTEGER DEFAULT 3",
+    "ALTER TABLE guild_settings ADD COLUMN nuke_role_limit INTEGER DEFAULT 3",
     "ALTER TABLE guild_settings ADD COLUMN automod_spam_limit INTEGER DEFAULT 5",
 ):
     try:
@@ -583,7 +584,14 @@ async def on_guild_role_create(role):
 
 @bot.event
 async def on_guild_role_delete(role):
-    await send_log(role.guild, "🗑️ Role Deleted", f"**Role:** `{role.name}` (`{role.id}`)", discord.Color.red(), "role")
+    await send_log(role.guild, "🗑️ Role Deleted", f"**Role:** {role.name} ({role.id})", discord.Color.red(), "role")
+    executor = await _find_recent_audit_executor(role.guild, discord.AuditLogAction.role_delete, role.id)
+    if executor is None:
+        return
+    threshold = get_guild_setting(role.guild.id, "nuke_role_limit", 3) or 3
+    await _record_nuke_action(role.guild, executor, "roles", int(threshold),
+        f"Anti-Nuke: deleted {threshold} roles within 2 minutes.")
+
 
 @bot.event
 async def on_guild_role_update(before, after):
@@ -617,54 +625,64 @@ async def on_member_update(before, after):
     if changes:
         await send_log(after.guild, "👤 Member Updated", f"**Member:** {after.mention} (`{after.id}`)\n" + "\n".join(changes), discord.Color.orange(), "member")
 
+async def _find_recent_audit_executor(guild: discord.Guild, action, target_id: int):
+    """Only trust a fresh audit entry that refers to the exact deleted object."""
+    try:
+        async for entry in guild.audit_logs(limit=8, action=action):
+            target = getattr(entry, "target", None)
+            if getattr(target, "id", None) != int(target_id):
+                continue
+            age = (datetime.now(timezone.utc) - entry.created_at).total_seconds()
+            if -2 <= age <= 15:
+                return entry.user
+    except Exception as e:
+        print(f"[ANTI-NUKE AUDIT ERROR] {type(e).__name__}: {e}")
+    return None
+
+
+async def _record_nuke_action(guild: discord.Guild, executor, action_key: str, threshold: int, reason: str):
+    if executor is None:
+        return
+    actor = guild.get_member(executor.id)
+    if actor is None or actor.bot or is_whitelisted(actor, guild):
+        return
+    now = datetime.now(timezone.utc).timestamp()
+    key = (guild.id, actor.id)
+    bucket = nuke_tracking.setdefault(key, {"bans": [], "channels": [], "roles": []})
+    bucket.setdefault(action_key, [])
+    bucket[action_key] = [stamp for stamp in bucket[action_key] if now - stamp < 120]
+    bucket[action_key].append(now)
+    if len(bucket[action_key]) < max(2, int(threshold)):
+        return
+    try:
+        await guild.ban(actor, reason=reason)
+        alert = guild.system_channel
+        if alert:
+            await alert.send(
+                f"🚨 **ANTI-NUKE ACTIVATED** 🚨\n"
+                f"{actor.mention} was banned after {len(bucket[action_key])} {action_key} actions in 2 minutes."
+            )
+        bucket[action_key].clear()
+    except Exception as e:
+        print(f"[ANTI-NUKE ACTION ERROR] {type(e).__name__}: {e}")
+        try:
+            await send_log(guild, "🚨 Anti-Nuke could not ban executor",
+                           f"**Executor:** {actor.mention} ({actor.id})\n**Reason:** {reason}\n**Error:** {type(e).__name__}: {e}",
+                           discord.Color.red(), "channel")
+        except Exception:
+            pass
+
+
 @bot.event
 async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     guild = channel.guild
-    await send_log(guild, "🗑️ Channel Deleted", f"**Channel:** #{channel.name} (`{channel.id}`)", discord.Color.red(), "channel")
-
-    try:
-        async for entry in guild.audit_logs(
-            limit=1,
-            action=discord.AuditLogAction.channel_delete
-        ):
-            executor = entry.user
-
-            if executor.bot or is_whitelisted(executor, guild):
-                return
-
-            current_time = datetime.now().timestamp()
-
-            if (guild.id, executor.id) not in nuke_tracking:
-                nuke_tracking[(guild.id, executor.id)] = {
-                    "bans": [],
-                    "channels": []
-                }
-
-            nuke_tracking[(guild.id, executor.id)]["channels"] = [
-                t for t in nuke_tracking[(guild.id, executor.id)]["channels"]
-                if current_time - t < 120
-            ]
-
-            nuke_tracking[(guild.id, executor.id)]["channels"].append(current_time)
-
-            if len(nuke_tracking[(guild.id, executor.id)]["channels"]) >= int(get_guild_setting(guild.id, "nuke_channel_limit", channel_limit) or channel_limit):
-                await guild.ban(
-                    executor,
-                    reason="Anti-Nuke Triggered: Mass deleting channels."
-                )
-
-                alert_channel = guild.system_channel
-
-                if alert_channel:
-                    await alert_channel.send(
-                        f"🚨 **ANTI-NUKE ACTIVATED** 🚨\n"
-                        f"User {executor.mention} was automatically banned for mass deleting channels."
-                    )
-
-            break
-
-    except Exception as e:
-        print(f"Error in on_guild_channel_delete anti-nuke: {e}")
+    await send_log(guild, "🗑️ Channel Deleted", f"**Channel:** #{channel.name} ({channel.id})", discord.Color.red(), "channel")
+    executor = await _find_recent_audit_executor(guild, discord.AuditLogAction.channel_delete, channel.id)
+    if executor is None:
+        return
+    threshold = get_guild_setting(guild.id, "nuke_channel_limit", channel_limit) or channel_limit
+    await _record_nuke_action(guild, executor, "channels", int(threshold),
+        f"Anti-Nuke: deleted {threshold} channels within 2 minutes.")
 
 
 # =========================================================
@@ -1714,6 +1732,18 @@ async def set_channel_limit(ctx: commands.Context, limit: int):
         return await send_mod_result(ctx, "❌ Choose a channel-delete threshold between 2 and 50.", True)
     set_guild_setting(ctx.guild.id, "nuke_channel_limit", limit)
     await send_mod_result(ctx, f"✅ Anti-Nuke channel threshold set to **{limit} deletions / 2 mins** for this server.")
+@bot.hybrid_command(
+    name="set_role_limit",
+    description="Set anti-nuke max role-delete threshold limit."
+)
+@permission_check("administrator")
+@app_permission_check("administrator")
+async def set_role_limit(ctx: commands.Context, limit: int):
+    if not 2 <= limit <= 50:
+        return await send_mod_result(ctx, "Choose a role-delete threshold between 2 and 50.", True)
+    set_guild_setting(ctx.guild.id, "nuke_role_limit", limit)
+    await send_mod_result(ctx, f"Anti-Nuke role threshold set to {limit} deletions / 2 mins for this server.")
+
 @bot.hybrid_command(
     name="set_spam_limit",
     description="Set max allowed messages within 5 seconds before mute."

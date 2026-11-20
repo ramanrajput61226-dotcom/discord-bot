@@ -126,3 +126,26 @@ def test_fixed_winner_tool_is_owner_only_test_mode_and_hidden():
     assert "giveaway_test_cmd.hidden = True" in test_command
     assert "giveawayfixed" not in source
     assert "Fixed winner:" not in source
+
+
+def test_anti_nuke_matches_fresh_audit_entries_to_exact_target():
+    source = read_source()
+    start = source.index("async def _find_recent_audit_executor")
+    end = source.index("@bot.event", start)
+    helper = source[start:end]
+    assert "entry.target" in helper
+    assert "target_id" in helper
+    assert "age <= 15" in helper
+    assert "guild.audit_logs(limit=8" in helper
+
+
+def test_anti_nuke_tracks_role_deletions_with_per_guild_threshold():
+    source = read_source()
+    assert 'ADD COLUMN nuke_role_limit INTEGER DEFAULT 3' in source
+    assert 'name="set_role_limit"' in source
+    role_start = source.index("async def on_guild_role_delete")
+    role_end = source.index("async def on_guild_role_update", role_start)
+    role_flow = source[role_start:role_end]
+    assert "AuditLogAction.role_delete" in role_flow
+    assert "_record_nuke_action" in role_flow
+    assert 'get_guild_setting(role.guild.id, "nuke_role_limit", 3)' in role_flow
